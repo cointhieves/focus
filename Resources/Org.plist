@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Company-wide settings, baked into the app at build time. Nothing here is secret.
+     See README.md, "Before you build". Put your own values in
+     Resources/Org.local.plist (not committed) or fill these in. -->
+<plist version="1.0">
+<dict>
+    <key>JiraSite</key>
+    <string></string>
+    <key>SlackClientID</key>
+    <string></string>
+</dict>
+</plist>

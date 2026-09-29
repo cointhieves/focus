@@ -1,0 +1,8 @@
+.build/
+build/
+.swiftpm/
+# Your own company values (see README "Before you build").
+Resources/Org.local.plist
+# Internal working notes, kept locally.
+PLAN.md
+DESIGN.md

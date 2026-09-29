@@ -1,0 +1,33 @@
+# Slack app for Focus. Create it once per company at https://api.slack.com/apps
+# (Create New App -> From a manifest), then put its Client ID in Resources/Org.plist.
+# User scopes only, read-only. PKCE means no client secret is ever needed.
+display_information:
+  name: Focus
+  description: A personal to-do queue on your Mac. Reads only your own Slack, with your own sign-in.
+  long_description: >-
+    Focus is a small Mac app that shows the Slack messages waiting on you: DMs, group DMs,
+    threads you're in, and mentions of you or your user groups. Every person who connects
+    signs in as themselves and gets their own token, which stays in their Mac's Keychain.
+    The permissions below mean "the person who clicked Allow", not "everyone": Focus can
+    only read what that person can already see in Slack, and never posts anything. The app
+    has no server and no shared key, so nobody, including whoever created the app, can see
+    another person's messages through it. Disconnecting in Focus revokes the token.
+oauth_config:
+  redirect_urls:
+    - http://localhost:53682/slack/callback
+  scopes:
+    user:
+      - search:read
+      - im:read
+      - im:history
+      - mpim:read
+      - mpim:history
+      - channels:history
+      - groups:history
+      - users:read
+      - usergroups:read
+  pkce_enabled: true
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: true
