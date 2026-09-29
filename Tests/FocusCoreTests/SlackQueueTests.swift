@@ -45,7 +45,8 @@ private let all = Set(SlackKind.all)
     #expect(try s.applySlack([st("dm:C1", marker: "2", since: Date(timeIntervalSince1970: 5_000))], answered: [], kinds: all).isEmpty)
     let row = try #require(try s.queue().first { $0.externalId == "dm:C1" })
     #expect(row.backSeq != nil)
-    #expect(row.waitingSince == Date(timeIntervalSince1970: 1_000))
+    // The clock start follows the sync (a reaction can move it later).
+    #expect(row.waitingSince == Date(timeIntervalSince1970: 5_000))
 }
 
 @Test func slackAnsweredIsDeletedAndLaterMessagePopsAgain() throws {
@@ -146,4 +147,19 @@ private let all = Set(SlackKind.all)
     // Same message on the next sync: still dismissed, not re-popped.
     #expect(try s.applySlack([st("dm:C1", marker: "1")], answered: [], kinds: all).isEmpty)
     #expect(try s.queue().isEmpty)
+}
+
+@Test func reactionCountsAsLastResponse() {
+    let me = "U-me"
+    let msgs: [[String: Any]] = [
+        ["ts": "100.0", "user": "U-a", "reactions": [["name": "+1", "users": [me]]]],
+        ["ts": "200.0", "user": "U-a", "reactions": [["name": "+1", "users": [me, "U-b"]]]],
+        ["ts": "300.0", "user": "U-a"],
+    ]
+    // My last written message was at 50; I reacted to 100 and 200, so only 300 waits.
+    #expect(SlackSource.lastResponse(myLastMessage: 50, messages: msgs, me: me) == 200)
+    // A later written message wins.
+    #expect(SlackSource.lastResponse(myLastMessage: 250, messages: msgs, me: me) == 250)
+    // Someone else's reaction doesn't count.
+    #expect(SlackSource.lastResponse(myLastMessage: 0, messages: [["ts": "5.0", "reactions": [["users": ["U-b"]]]]], me: me) == 0)
 }

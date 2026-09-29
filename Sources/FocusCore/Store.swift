@@ -493,8 +493,9 @@ public final class Store {
             let previous = try changeMarker(source: .slack, externalId: st.key)
             let item = try upsert(source: .slack, externalId: st.key, title: st.title, detail: st.detail,
                                   url: st.url, lastMyResponse: nil, changeMarker: st.marker, now: now)
-            try run("UPDATE items SET waiting_since = COALESCE(waiting_since, ?) WHERE id = ?",
-                    st.waitingSince.timeIntervalSince1970, item.id)
+            // Each sync recomputes when the first unanswered message arrived; a reply or
+            // reaction moves it later, so take the sync's value rather than keeping the old one.
+            try run("UPDATE items SET waiting_since = ? WHERE id = ?", st.waitingSince.timeIntervalSince1970, item.id)
             let nowVisible = try !isDismissed(item.id)
             let snoozedWithNews = try self.item(item.id).snoozedUntil != nil && previous != st.marker
             if existing == nil || (wasHidden && nowVisible) || snoozedWithNews {

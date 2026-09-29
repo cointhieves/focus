@@ -109,6 +109,15 @@ public final class SlackSource: @unchecked Sendable {
         return await user(uid).human
     }
 
+    /// A reaction counts like a reply: my last response is the later of my last message
+    /// and the newest message I reacted to. Messages after it are what's waiting.
+    static func lastResponse(myLastMessage: Double, messages: [[String: Any]], me: String) -> Double {
+        let reacted = messages.filter { m in
+            ((m["reactions"] as? [[String: Any]]) ?? []).contains { ($0["users"] as? [String] ?? []).contains(me) }
+        }.compactMap { ts($0["ts"]) }.max() ?? 0
+        return max(myLastMessage, reacted)
+    }
+
     func reactedByMe(_ m: [String: Any]?) -> Bool {
         ((m?["reactions"] as? [[String: Any]]) ?? []).contains { ($0["users"] as? [String] ?? []).contains(me) }
     }
@@ -297,17 +306,18 @@ public final class SlackSource: @unchecked Sendable {
                 guard kinds.contains(kind) else { continue }
                 let key = "\(kind):\(c)"
                 handled.insert(key)
-                let mine = myLatest[c] ?? 0
+                // Search results carry no reactions, so read the recent history once to see
+                // which messages I reacted to.
+                let oldestCandidate = msgs.compactMap { Self.ts($0["ts"]) }.min() ?? now.timeIntervalSince1970
+                let hist = (try? await call("conversations.history", ["channel": c, "oldest": String(oldestCandidate - 1),
+                                                                      "inclusive": "true", "limit": "100"]))?["messages"] as? [[String: Any]] ?? []
+                let mine = Self.lastResponse(myLastMessage: myLatest[c] ?? 0, messages: hist, me: me)
                 var waiting: [[String: Any]] = []
                 for m in msgs where (Self.ts(m["ts"]) ?? 0) > mine {
                     if await fromOtherHuman(m) { waiting.append(m) }
                 }
                 waiting.sort { (Self.ts($0["ts"]) ?? 0) < (Self.ts($1["ts"]) ?? 0) }
                 guard let first = waiting.first, let newest = waiting.last, let newestTs = newest["ts"] as? String else {
-                    if open[key] != nil { answered.insert(key) }
-                    continue
-                }
-                if reactedByMe(await message(c, newestTs)) {
                     if open[key] != nil { answered.insert(key) }
                     continue
                 }
@@ -341,13 +351,13 @@ public final class SlackSource: @unchecked Sendable {
                     continue
                 }
                 let msgs = (r["messages"] as? [[String: Any]]) ?? []
-                let myLast = msgs.filter { ($0["user"] as? String) == me }.compactMap { Self.ts($0["ts"]) }.max() ?? 0
+                let myLastMsg = msgs.filter { ($0["user"] as? String) == me }.compactMap { Self.ts($0["ts"]) }.max() ?? 0
+                let myLast = Self.lastResponse(myLastMessage: myLastMsg, messages: msgs, me: me)
                 var waiting: [[String: Any]] = []
                 for m in msgs where (Self.ts(m["ts"]) ?? 0) > myLast {
                     if await fromOtherHuman(m) { waiting.append(m) }
                 }
-                guard let first = waiting.first, let newest = waiting.last, let newestTs = newest["ts"] as? String,
-                      !reactedByMe(newest) else {
+                guard let first = waiting.first, let newest = waiting.last, let newestTs = newest["ts"] as? String else {
                     if open[key] != nil { answered.insert(key) }
                     continue
                 }
