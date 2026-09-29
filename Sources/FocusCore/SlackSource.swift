@@ -283,6 +283,12 @@ public final class SlackSource: @unchecked Sendable {
             for m in try await searchAll("is:dm -from:<@\(me)> after:\(after(newSince))") {
                 note(m)
                 guard let c = (m["channel"] as? [String: Any])?["id"] as? String else { continue }
+                // A reply inside a thread belongs to that thread's item, not the DM's: otherwise
+                // one reply shows twice, and answering in the thread leaves the DM item behind.
+                if let tts = Self.threadParam(m["permalink"] as? String), tts != (m["ts"] as? String) {
+                    threads["thread:\(c):\(tts)"] = (c, tts)
+                    continue
+                }
                 byConv[c, default: []].append(m)
             }
             for (c, msgs) in byConv {
@@ -345,7 +351,8 @@ public final class SlackSource: @unchecked Sendable {
                     if open[key] != nil { answered.insert(key) }
                     continue
                 }
-                let chan = channelNames[th.channel].map { "#\($0)" } ?? "a thread"
+                // Group DMs have internal names like "mpdm-ann--bob-1"; show them as a group DM.
+                let chan = channelNames[th.channel].map { $0.hasPrefix("mpdm-") ? "group DM" : "#\($0)" } ?? "a thread"
                 let who = await user(newest["user"] as? String ?? "").name
                 let link = "https://\(host)/archives/\(th.channel)/p\(newestTs.replacingOccurrences(of: ".", with: ""))?thread_ts=\(th.tts)&cid=\(th.channel)"
                 states.append(SlackItemState(key: key, title: "\(who) in \(chan): \(await text(newest))",
