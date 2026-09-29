@@ -237,8 +237,18 @@ final class QueueModel: ObservableObject {
             let token = newToken.trimmingCharacters(in: .whitespacesAndNewlines)
             if !token.isEmpty {
                 try Keychain.saveToken(token)
+                // Read it back so a failed write can't pass silently.
+                guard Keychain.readToken() == token else {
+                    jiraStatus = "Save failed: the API token didn't stick in the Keychain"
+                    return
+                }
                 cachedToken = token
                 tokenLoaded = true
+            } else if !hasJiraToken {
+                jiraStatus = "No API token entered. Paste it into the API token field, then Save & Test."
+                try store.saveJiraConfig(config)
+                jiraConfig = try store.loadJiraConfig()
+                return
             }
             try store.saveJiraConfig(config)
             jiraConfig = try store.loadJiraConfig()
