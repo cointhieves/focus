@@ -64,3 +64,64 @@ private func m(_ key: String, _ marker: String) -> JiraMentionState {
     try s.applyJira([], inScopeKeys: [], site: nil)
     #expect(try s.mentionKeys() == ["K-3"])
 }
+
+// "Tickets I reported": the EPSPT-36281 shape. On my ticket, a comment after mine counts
+// unless it tags someone else; a direct @mention of me still counts (and wins the reason).
+private let t0 = Date(timeIntervalSince1970: 1_000_000)
+private func c(_ id: String, _ who: String, _ min: Double, me: Bool = false, others: Bool = false,
+               human: Bool = true) -> JiraMentions.Comment {
+    .init(id: id, author: who, authorName: who, created: t0.addingTimeInterval(min * 60),
+          mentionsMe: me, mentionsOthers: others, human: human)
+}
+
+@Test func reportedTicketCountsUntaggedCommentsOnly() {
+    let side = [c("1", "agent", 1, others: true)]          // "Hi Hai, could you help?"
+    #expect(JiraMentions.classify(key: "E-1", summary: "s", me: "me", comments: side,
+                                  descriptionMention: nil as (Date, String, String)?, reportedByMe: true) == nil)
+    let plain = side + [c("2", "agent", 2)]                // "Leon, please do X" (no @)
+    let st = JiraMentions.classify(key: "E-1", summary: "s", me: "me", comments: plain,
+                                   descriptionMention: nil as (Date, String, String)?, reportedByMe: true)
+    #expect(st?.marker == "2")
+    #expect(st?.viaReport == true)
+    // Not my ticket: the same comment doesn't count.
+    #expect(JiraMentions.classify(key: "E-1", summary: "s", me: "me", comments: plain,
+                                  descriptionMention: nil as (Date, String, String)?, reportedByMe: false) == nil)
+}
+
+@Test func reportedTicketClearsWhenIReplyAndSkipsApps() {
+    let answered = [c("1", "agent", 1), c("2", "me", 2)]
+    #expect(JiraMentions.classify(key: "E-1", summary: "s", me: "me", comments: answered,
+                                  descriptionMention: nil as (Date, String, String)?, reportedByMe: true) == nil)
+    let bot = [c("1", "automation", 1, human: false)]
+    #expect(JiraMentions.classify(key: "E-1", summary: "s", me: "me", comments: bot,
+                                  descriptionMention: nil as (Date, String, String)?, reportedByMe: true) == nil)
+}
+
+@Test func mentionOnReportedTicketIsAMention() {
+    let st = JiraMentions.classify(key: "E-1", summary: "s", me: "me",
+                                   comments: [c("1", "agent", 1), c("2", "agent", 2, me: true)],
+                                   descriptionMention: nil as (Date, String, String)?, reportedByMe: true)
+    #expect(st?.viaReport == false)
+}
+
+@Test func reportedRowsHideWithTheirToggleAndSwitchReason() throws {
+    let s = try store()
+    let r = JiraMentionState(key: "E-1", summary: "s", mentionedBy: "a", waitingSince: Date(), marker: "1", viaReport: true)
+    _ = try s.applyJiraMentions([r], remove: [], site: nil)
+    #expect(try s.queue().map { $0.externalId ?? "" } == ["reported:E-1"])
+    #expect(try s.queue().first?.detail == "E-1 · a commented")
+    try s.setPref("jira_reported", "0")
+    #expect(try s.queue().isEmpty)
+    try s.setPref("jira_reported", "1")
+    let m = JiraMentionState(key: "E-1", summary: "s", mentionedBy: "a", waitingSince: Date(), marker: "2")
+    _ = try s.applyJiraMentions([m], remove: [], site: nil)
+    #expect(try s.queue().map { $0.externalId ?? "" } == ["mention:E-1"])
+    #expect(try s.mentionKeys() == ["E-1"])
+    _ = try s.applyJiraMentions([], remove: ["E-1"], site: nil)
+    #expect(try s.queue().isEmpty)
+}
+
+@Test func projectOfKey() {
+    #expect(JiraClient.project(of: "SECPLATOPS-2891") == "SECPLATOPS")
+    #expect(JiraClient.project(of: "EPSPT-36281") == "EPSPT")
+}

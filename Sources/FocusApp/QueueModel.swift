@@ -124,6 +124,16 @@ final class QueueModel: ObservableObject {
         syncJira()
         jiraMentionsOn = (try? store.pref("jira_mentions")) != "0"
         jiraSprintOn = (try? store.pref("jira_sprint")) != "0"
+        jiraReportedOn = (try? store.pref("jira_reported")) != "0"
+        for line in ((try? store.pref("jira_ignored_names")) ?? "").split(separator: "\n") {
+            let kv = line.split(separator: "=", maxSplits: 1)
+            if kv.count == 2 { jiraIgnoredNames[String(kv[0])] = String(kv[1]) }
+        }
+        // Tidy names left over from people removed before names were pruned on removal.
+        if jiraIgnoredNames.keys.contains(where: { !jiraConfig.ignoredAccountIds.contains($0) }) {
+            jiraIgnoredNames = jiraIgnoredNames.filter { jiraConfig.ignoredAccountIds.contains($0.key) }
+            saveIgnoredNames()
+        }
         slackEnabled = (try? store.pref("slack_enabled")) == "1"
         if let saved = try? store.pref("slack_bot_channels") {
             slackBotChannels = Set(saved.split(separator: ",").map(String.init))
@@ -285,8 +295,59 @@ final class QueueModel: ObservableObject {
         testJira()
     }
 
+    /// Names shown for ignored account IDs (account ID -> display name).
+    @Published private(set) var jiraIgnoredNames: [String: String] = [:]
+    /// Result of the last "Ignore comments from" lookup that didn't add anyone.
+    @Published private(set) var jiraIgnoreMessage = ""
+
+    /// True when jiraIgnoreMessage is a failure (shown red), not "Looking up…".
+    @Published private(set) var jiraIgnoreError = false
+
+    /// Adds a person to "Ignore comments from" by email or name (or a raw account ID),
+    /// looked up live in Jira. Returns false (and shows a red message) when nobody, or
+    /// more than one person, matches, so the typed text stays in the field.
+    func addJiraIgnored(_ text: String) async -> Bool {
+        func fail(_ msg: String) -> Bool { jiraIgnoreMessage = msg; jiraIgnoreError = true; return false }
+        jiraIgnoreMessage = ""; jiraIgnoreError = false
+        if JiraClient.looksLikeAccountId(text) {
+            setJiraIgnored(jiraConfig.ignoredAccountIds + [text])
+            return true
+        }
+        guard let token = jiraToken else { return fail("Connect Jira first.") }
+        let client = JiraClient(config: jiraConfig, token: token)
+        jiraIgnoreMessage = "Looking up \(text)…"
+        do {
+            let results = try await client.searchUsers(text)
+            guard let user = JiraClient.pickUser(text, from: results) else {
+                return fail(results.isEmpty ? "Couldn't find a Jira user matching \"\(text)\"."
+                            : "\(results.count) people match \"\(text)\". Use their email address.")
+            }
+            jiraIgnoreMessage = ""
+            if !jiraConfig.ignoredAccountIds.contains(user.accountId) {
+                jiraIgnoredNames[user.accountId] = user.displayName ?? user.emailAddress ?? text
+                saveIgnoredNames()
+                setJiraIgnored(jiraConfig.ignoredAccountIds + [user.accountId])
+            }
+            return true
+        } catch {
+            return fail("Lookup failed: \(error)")
+        }
+    }
+
+    private func saveIgnoredNames() {
+        let kept = jiraIgnoredNames
+        // "id=name" pairs; names can't contain the separator characters we use.
+        try? store.setPref("jira_ignored_names", kept.map { "\($0.key)=\($0.value.replacingOccurrences(of: "\n", with: " "))" }
+            .joined(separator: "\n"))
+    }
+
     /// Saves the ignored-accounts list right away (no Connect needed).
     func setJiraIgnored(_ ids: [String]) {
+        // Drop saved names for anyone no longer on the list.
+        if jiraIgnoredNames.keys.contains(where: { !ids.contains($0) }) {
+            jiraIgnoredNames = jiraIgnoredNames.filter { ids.contains($0.key) }
+            saveIgnoredNames()
+        }
         var c = jiraConfig
         c.ignoredAccountIds = ids
         do {
@@ -371,22 +432,25 @@ final class QueueModel: ObservableObject {
                 let result = try await client.fetchStates(greenUntilHours: greenUntil, workStartHour: workStart, workEndHour: workEnd)
                 let states = result.states
                 let popped = applySync(result, site: site)
-                var mentionCount = 0
-                if !jiraMentionsOn { jiraQuiet = false }
-                if jiraMentionsOn {
+                var mentionCount = 0, reportedCount = 0
+                if !jiraMentionsOn && !jiraReportedOn { jiraQuiet = false }
+                if jiraMentionsOn || jiraReportedOn {
                     // First run looks back 30 days for live threads; after that, 3 days catches
                     // every new mention. Items already shown are re-checked until answered.
                     let first = (try? store.pref("jira_mentions_synced_once")) != "1"
                     let m = try await client.fetchMentions(days: first ? 30 : 3, open: try store.mentionKeys(),
-                                                           skip: Set(states.map(\.key)))
+                                                           skip: Set(states.map(\.key)), includeReported: true,
+                                                           teamProjects: learnTeamProjects(result.inScopeKeys))
                     applyMentions(m, site: site)
                     try? store.setPref("jira_mentions_synced_once", "1")
                     mentionCount = items.filter { $0.externalId?.hasPrefix("mention:") == true }.count
+                    reportedCount = items.filter { $0.externalId?.hasPrefix("reported:") == true }.count
                 }
                 let t = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
                 let total = items.filter { $0.source == .jira && $0.externalId?.contains("DEMO-") != true }.count
                 jiraStatus = "Synced at \(t): \(total) ticket\(total == 1 ? "" : "s") need\(total == 1 ? "s" : "") you"
                     + (mentionCount > 0 ? " (\(mentionCount) mention\(mentionCount == 1 ? "" : "s"))" : "")
+                    + (reportedCount > 0 ? " (\(reportedCount) you reported)" : "")
                 log.notice("jira sync: \(states.count, privacy: .public) states, popped \(popped.joined(separator: ","), privacy: .public)")
             } catch {
                 jiraStatus = "Sync failed: \(error)"
@@ -410,6 +474,33 @@ final class QueueModel: ObservableObject {
         if on { jiraQuiet = true; syncJira() } else { reload() }   // hidden, not deleted
     }
 
+    /// My team's projects: projects my sprint tickets have come from in the last 30 days.
+    /// Remembered with a last-seen time (pref "KEY=epoch,..."), so a gap between sprints
+    /// doesn't forget them, and a one-off project drops out on its own. Nothing to configure.
+    private func learnTeamProjects(_ sprintKeys: Set<String>, now: Date = Date()) -> Set<String> {
+        var seen: [String: Double] = [:]
+        for part in ((try? store.pref("jira_team_projects_seen")) ?? "").split(separator: ",") {
+            let kv = part.split(separator: "=")
+            // Older builds stored bare keys; treat those as seen now.
+            seen[String(kv[0])] = kv.count > 1 ? Double(kv[1]) ?? now.timeIntervalSince1970 : now.timeIntervalSince1970
+        }
+        for p in sprintKeys.map(JiraClient.project(of:)) where !p.isEmpty { seen[p] = now.timeIntervalSince1970 }
+        let cutoff = now.timeIntervalSince1970 - 30 * 86_400
+        seen = seen.filter { $0.value >= cutoff }
+        try? store.setPref("jira_team_projects_seen",
+                           seen.keys.sorted().map { "\($0)=\(Int(seen[$0]!))" }.joined(separator: ","))
+        return Set(seen.keys)
+    }
+
+    /// Whether comments on tickets I reported show (see JiraMentions.classify). On by default.
+    @Published private(set) var jiraReportedOn = true
+
+    func setJiraReported(_ on: Bool) {
+        try? store.setPref("jira_reported", on ? "1" : "0")
+        jiraReportedOn = on
+        if on { jiraQuiet = true; syncJira() } else { reload() }   // hidden, not deleted
+    }
+
     func setJiraMentions(_ on: Bool) {
         try? store.setPref("jira_mentions", on ? "1" : "0")
         jiraMentionsOn = on
@@ -420,9 +511,8 @@ final class QueueModel: ObservableObject {
     private func applyMentions(_ m: JiraMentionResult, site: URL?, limitTo: Set<String>? = nil) {
         var closing: [(Item, Int)] = [], responded: [(Item, Int)] = []
         for (index, item) in displayItems.enumerated() {
-            guard let ext = item.externalId, ext.hasPrefix("mention:"),
+            guard let ext = item.externalId, let key = Store.mentionKey(ext),
                   !farewells.contains(where: { $0.item.id == item.id }) else { continue }
-            let key = String(ext.dropFirst(8))
             guard limitTo?.contains(key) ?? !key.hasPrefix("DEMO-") else { continue }
             if m.closed.contains(key) { closing.append((item, index)) }
             else if m.answered.contains(key) { responded.append((item, index)) }

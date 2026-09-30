@@ -274,14 +274,26 @@ struct EditableList: View {
     let prompt: String
     let items: [String]
     var normalize: (String) -> String = { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// How an entry is shown (e.g. a person's name for a stored account ID).
+    var label: (String) -> String = { $0 }
+    /// If set, handles adding (e.g. a live lookup) instead of appending the typed text.
+    /// Returns true when it added something; on false the typed text stays so it can be fixed.
+    var onAdd: ((String) async -> Bool)? = nil
+    /// Shown under the field: grey while working, red when `messageIsError`.
+    var message: String = ""
+    var messageIsError = false
     let onChange: ([String]) -> Void
     @State private var draft = ""
 
     private func add() {
         let value = normalize(draft)
-        draft = ""
-        guard !value.isEmpty, !items.contains(value) else { return }
-        onChange(items + [value])
+        guard !value.isEmpty, !items.contains(value) else { draft = ""; return }
+        if let onAdd {
+            Task { if await onAdd(value), normalize(draft) == value { draft = "" } }
+        } else {
+            draft = ""
+            onChange(items + [value])
+        }
     }
 
     var body: some View {
@@ -295,12 +307,17 @@ struct EditableList: View {
                     .disabled(normalize(draft).isEmpty)
                     .help("Add")
             }
+            if !message.isEmpty {
+                Label(message, systemImage: messageIsError ? "exclamationmark.triangle.fill" : "magnifyingglass")
+                    .font(.caption).foregroundStyle(messageIsError ? Color.red : Color.secondary)
+            }
             if !items.isEmpty {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(items, id: \.self) { item in
                             HStack {
-                                Text(item).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+                                Text(label(item)).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+                                    .help(item)
                                 Spacer()
                                 Button { onChange(items.filter { $0 != item }) } label: {
                                     Image(systemName: "minus.circle.fill").foregroundStyle(.red)
@@ -430,13 +447,20 @@ struct JiraSettingsSection: View {
                         Toggle("Mentions", isOn: Binding(get: { model.jiraMentionsOn }, set: { model.setJiraMentions($0) }))
                             .toggleStyle(.checkbox)
                             .help("Any ticket where someone mentioned you and you haven't commented since")
+                        Toggle("Tickets I reported", isOn: Binding(get: { model.jiraReportedOn }, set: { model.setJiraReported($0) }))
+                            .toggleStyle(.checkbox)
+                            .help("A ticket you opened in another team's queue, when someone comments after you without tagging someone else")
                     }
                 }
                 AdvancedGroup {
-                    EditableList(title: "Ignore comments from", prompt: "Type an Atlassian account ID and press Return",
+                    EditableList(title: "Ignore comments from", prompt: "Type an email address and press Return",
                                  items: model.jiraConfig.ignoredAccountIds,
+                                 label: { model.jiraIgnoredNames[$0] ?? $0 },
+                                 onAdd: { await model.addJiraIgnored($0) },
+                                 message: model.jiraIgnoreMessage,
+                                 messageIsError: model.jiraIgnoreError,
                                  onChange: { model.setJiraIgnored($0) })
-                    Text("Comments from these Atlassian accounts (bots posting as people) never count as a reply. Changes save right away.")
+                    Text("Comments from these people or bots never count as a reply or pop a ticket. A name works too if only one person matches. Changes save right away.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

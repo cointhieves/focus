@@ -16,6 +16,15 @@ tool drives the same queue, which is handy for scripts and AI agents.
 Most recent first. To update, pull the latest code and run `make install` again.
 
 **September 30, 2026**
+- **Tickets you reported in other teams' queues.** A new **Tickets I reported** checkbox (on
+  by default) pops a ticket you opened in another team's project (a support or service
+  queue, say) when someone comments after you without tagging someone else, even if they
+  don't @mention you. On tickets you reported in your own team's projects, only @mentions
+  count: whoever is working it owns it. Focus works out your team's projects from your own
+  sprint tickets, so there's nothing to set up.
+- **Ignore people by email.** "Ignore comments from" now takes an email address (or a name,
+  if only one person matches). Focus looks them up in Jira and shows their name in the list.
+  If nobody matches, it says so in red and keeps what you typed so you can fix it.
 - **Show less.** After "+N more" expands the list, a **Show less** button puts the panel back
   to your size. Hiding or quitting Focus while expanded also returns it to your size, instead
   of leaving it stuck tall.

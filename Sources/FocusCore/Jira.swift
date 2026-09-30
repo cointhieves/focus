@@ -27,6 +27,7 @@ public struct JiraUser: Decodable, Equatable, Sendable {
     public let accountId: String
     public let accountType: String?
     public let displayName: String?
+    public var emailAddress: String? = nil
 }
 
 public struct JiraComment: Decodable, Equatable, Sendable {
@@ -141,6 +142,25 @@ public struct JiraClient: Sendable {
 
     public func myself() async throws -> JiraUser {
         try await get("/rest/api/3/myself", query: [])
+    }
+
+    /// Finds people by email or name (Jira's user search matches either).
+    public func searchUsers(_ query: String) async throws -> [JiraUser] {
+        try await get("/rest/api/3/user/search", query: [URLQueryItem(name: "query", value: query),
+                                                         URLQueryItem(name: "maxResults", value: "10")])
+    }
+
+    /// Picks the one person `text` means: an exact email match wins; otherwise the
+    /// search must have exactly one result. Nil when it's ambiguous or nobody matched.
+    public static func pickUser(_ text: String, from results: [JiraUser]) -> JiraUser? {
+        let t = text.lowercased()
+        if let exact = results.first(where: { $0.emailAddress?.lowercased() == t }) { return exact }
+        return results.count == 1 ? results[0] : nil
+    }
+
+    /// True for text that is already an Atlassian account ID ("712020:uuid" or 24 hex).
+    public static func looksLikeAccountId(_ text: String) -> Bool {
+        text.contains(":") && !text.contains("@") || (text.count == 24 && text.allSatisfy(\.isHexDigit))
     }
 
     /// My started tickets in open sprints. Jira's "In Progress" status category covers
@@ -258,9 +278,13 @@ public struct JiraMentionState: Equatable, Sendable {
     public let waitingSince: Date
     /// Id of the newest unanswered mention; changes when a new one arrives.
     public let marker: String
-    public init(key: String, summary: String, mentionedBy: String, waitingSince: Date, marker: String) {
+    /// True when nobody @mentioned me: it's waiting only because it's my ticket and someone
+    /// commented without tagging anyone else ("Tickets I reported").
+    public let viaReport: Bool
+    public init(key: String, summary: String, mentionedBy: String, waitingSince: Date, marker: String,
+                viaReport: Bool = false) {
         self.key = key; self.summary = summary; self.mentionedBy = mentionedBy
-        self.waitingSince = waitingSince; self.marker = marker
+        self.waitingSince = waitingSince; self.marker = marker; self.viaReport = viaReport
     }
 }
 
@@ -286,19 +310,39 @@ public enum JiraMentions {
         return false
     }
 
+    /// True if an ADF document @mentions anyone other than `me`.
+    public static func mentionsOthers(_ adf: Any?, _ me: String) -> Bool {
+        if let d = adf as? [String: Any] {
+            if d["type"] as? String == "mention", let id = (d["attrs"] as? [String: Any])?["id"] as? String, id != me { return true }
+            return d.values.contains { mentionsOthers($0, me) }
+        }
+        if let a = adf as? [Any] { return a.contains { mentionsOthers($0, me) } }
+        return false
+    }
+
     public struct Comment: Sendable {
         public let id: String, author: String, authorName: String, created: Date, mentionsMe: Bool
-        public init(id: String, author: String, authorName: String, created: Date, mentionsMe: Bool) {
-            self.id = id; self.author = author; self.authorName = authorName; self.created = created; self.mentionsMe = mentionsMe
+        /// Tags someone else (a side conversation), so it doesn't count for "Tickets I reported".
+        public let mentionsOthers: Bool
+        /// A person (not an app/integration account, not on the ignore list).
+        public let human: Bool
+        public init(id: String, author: String, authorName: String, created: Date, mentionsMe: Bool,
+                    mentionsOthers: Bool = false, human: Bool = true) {
+            self.id = id; self.author = author; self.authorName = authorName; self.created = created
+            self.mentionsMe = mentionsMe; self.mentionsOthers = mentionsOthers; self.human = human
         }
     }
 
     /// The unanswered state for one ticket, or nil if nothing waits on me.
     /// `descriptionMention` is (created, reporter id, reporter name) when the description mentions me.
+    /// `reportedByMe`: my own ticket, where a comment that tags nobody else also counts.
     public static func classify(key: String, summary: String, me: String, comments: [Comment],
-                                descriptionMention: (Date, String, String)?) -> JiraMentionState? {
+                                descriptionMention: (Date, String, String)?,
+                                reportedByMe: Bool = false) -> JiraMentionState? {
         let myLast = comments.filter { $0.author == me }.map(\.created).max() ?? .distantPast
-        var hits = comments.filter { $0.author != me && $0.mentionsMe && $0.created > myLast }
+        let after = comments.filter { $0.author != me && $0.created > myLast }
+        let mentioned = after.contains { $0.mentionsMe } || (descriptionMention.map { $0.1 != me && $0.0 > myLast } ?? false)
+        var hits = after.filter { $0.mentionsMe || (reportedByMe && $0.human && !$0.mentionsOthers) }
             .map { (id: $0.id, at: $0.created, who: $0.authorName) }
         if let (at, reporter, name) = descriptionMention, reporter != me, at > myLast {
             hits.append((id: "description", at: at, who: name))
@@ -306,11 +350,16 @@ public enum JiraMentions {
         hits.sort { $0.at < $1.at }
         guard let first = hits.first, let newest = hits.last else { return nil }
         return JiraMentionState(key: key, summary: summary, mentionedBy: newest.who,
-                                waitingSince: first.at, marker: newest.id)
+                                waitingSince: first.at, marker: newest.id, viaReport: !mentioned)
     }
 }
 
 extension JiraClient {
+    /// "SECPLATOPS" for "SECPLATOPS-2891".
+    public static func project(of key: String) -> String {
+        key.split(separator: "-").dropLast().joined(separator: "-")
+    }
+
     static let isoParser: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -322,9 +371,16 @@ extension JiraClient {
     /// `days` bounds the search; `open` are mention keys already in the queue, re-checked
     /// here so they stay until answered or Done even if the ticket goes quiet.
     /// `skip` are keys already shown as sprint tickets.
-    public func fetchMentions(days: Int, open: Set<String>, skip: Set<String>, maxConcurrent: Int = 8) async throws -> JiraMentionResult {
+    /// `includeReported` also looks at tickets I reported (see JiraMentions.classify).
+    /// `teamProjects`: my team's project keys. There, a ticket I reported but someone else
+    /// works is theirs, so only @mentions count; the reporter rule is for outside queues.
+    public func fetchMentions(days: Int, open: Set<String>, skip: Set<String>, includeReported: Bool = false,
+                              teamProjects: Set<String> = [], maxConcurrent: Int = 8) async throws -> JiraMentionResult {
         let me = try await myself().accountId
-        let jql = "(comment ~ currentUser() OR description ~ currentUser()) AND updated >= -\(days)d AND statusCategory != Done"
+        let ignored = Set(config.ignoredAccountIds)
+        let who = includeReported ? "comment ~ currentUser() OR description ~ currentUser() OR reporter = currentUser()"
+                                  : "comment ~ currentUser() OR description ~ currentUser()"
+        let jql = "(\(who)) AND updated >= -\(days)d AND statusCategory != Done"
         var keys = Set<String>(), token: String?
         repeat {
             var q = [URLQueryItem(name: "jql", value: jql), URLQueryItem(name: "fields", value: "summary"),
@@ -353,9 +409,12 @@ extension JiraClient {
                 for c in batch {
                     let a = c["author"] as? [String: Any]
                     guard let created = (c["created"] as? String).flatMap(Self.isoParser.date(from:)) else { continue }
-                    comments.append(.init(id: c["id"] as? String ?? "", author: a?["accountId"] as? String ?? "",
+                    let id = a?["accountId"] as? String ?? ""
+                    let human = (a?["accountType"] as? String ?? "atlassian") == "atlassian" && !ignored.contains(id)
+                    comments.append(.init(id: c["id"] as? String ?? "", author: id,
                                           authorName: a?["displayName"] as? String ?? "someone", created: created,
-                                          mentionsMe: JiraMentions.mentions(c["body"], me)))
+                                          mentionsMe: JiraMentions.mentions(c["body"], me),
+                                          mentionsOthers: JiraMentions.mentionsOthers(c["body"], me), human: human))
                 }
                 start += batch.count
                 if batch.isEmpty || start >= (page["total"] as? Int ?? 0) { break }
@@ -366,8 +425,11 @@ extension JiraClient {
                 let r = f["reporter"] as? [String: Any]
                 desc = (created, r?["accountId"] as? String ?? "", r?["displayName"] as? String ?? "someone")
             }
+            let reporter = (f["reporter"] as? [String: Any])?["accountId"] as? String
             let st = JiraMentions.classify(key: key, summary: f["summary"] as? String ?? key, me: me,
-                                           comments: comments, descriptionMention: desc)
+                                           comments: comments, descriptionMention: desc,
+                                           reportedByMe: includeReported && reporter == me
+                                               && !teamProjects.contains(JiraClient.project(of: key)))
             return (st, false)
         }
 

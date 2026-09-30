@@ -196,3 +196,14 @@ private func ticket(_ key: String, waiting: Bool = false) -> JiraTicketState {
 @Test func commentEarlierTodayStaysHidden() {
     #expect(classify([comment("1", me, at: hoursAgo(2))]) == nil)
 }
+
+@Test func pickUserPrefersExactEmailElseSingleMatch() {
+    let a = JiraUser(accountId: "1", accountType: "atlassian", displayName: "Ann", emailAddress: "ann@x.com")
+    let b = JiraUser(accountId: "2", accountType: "atlassian", displayName: "Anna", emailAddress: "anna@x.com")
+    #expect(JiraClient.pickUser("ANN@x.com", from: [b, a])?.accountId == "1")
+    #expect(JiraClient.pickUser("ann", from: [a, b]) == nil)
+    #expect(JiraClient.pickUser("anna", from: [b])?.accountId == "2")
+    #expect(JiraClient.looksLikeAccountId("712020:6b90e3b2-ccd4-4160-8ee9-038b35831fa6"))
+    #expect(JiraClient.looksLikeAccountId("640ba5109cba7ca0287bf77b"))
+    #expect(!JiraClient.looksLikeAccountId("bot@example.com"))
+}

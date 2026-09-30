@@ -138,6 +138,7 @@ public final class Store {
         let jiraOff = try pref("jira_enabled") == "0"
         let mentionsOff = try pref("jira_mentions") == "0"
         let sprintOff = try pref("jira_sprint") == "0"
+        let reportedOff = try pref("jira_reported") == "0"
         let kinds = try pref("slack_kinds").map { Set($0.split(separator: ",").map(String.init)) }
         return { item in
             let ext = item.externalId ?? ""
@@ -149,7 +150,9 @@ public final class Store {
                 return true
             case .jira:
                 if jiraOff { return false }
-                return ext.hasPrefix("mention:") ? !mentionsOff : !sprintOff
+                if ext.hasPrefix("mention:") { return !mentionsOff }
+                if ext.hasPrefix("reported:") { return !reportedOff }
+                return !sprintOff
             case .idea: return true
             }
         }
@@ -406,10 +409,10 @@ public final class Store {
         let keep = Set(states.map(\.key))
         // Mention rows ("mention:KEY") are managed by applyJiraMentions; a ticket that is
         // now a sprint item drops its mention row so it isn't shown twice.
-        for (id, key) in try externalIds(source: .jira) where key.hasPrefix("mention:") && keep.contains(String(key.dropFirst(8))) {
+        for (id, key) in try externalIds(source: .jira) where Self.mentionKey(key).map(keep.contains) == true {
             try run("DELETE FROM items WHERE id = ?", id)
         }
-        for (id, key) in try externalIds(source: .jira) where !key.hasPrefix("mention:") && !keep.contains(key) && (limitTo?.contains(key) ?? !key.hasPrefix("DEMO-")) {
+        for (id, key) in try externalIds(source: .jira) where Self.mentionKey(key) == nil && !keep.contains(key) && (limitTo?.contains(key) ?? !key.hasPrefix("DEMO-")) {
             guard let inScopeKeys, !inScopeKeys.contains(key), !doneKeys.contains(key) else {
                 try run("DELETE FROM items WHERE id = ?", id)
                 continue
@@ -441,12 +444,16 @@ public final class Store {
                                   limitTo: Set<String>? = nil, now: Date = Date()) throws -> [String] {
         var popped: [String] = []
         for st in states {
-            let ext = "mention:\(st.key)"
+            let ext = (st.viaReport ? "reported:" : "mention:") + st.key
+            // One row per ticket: if the reason changed (a mention arrived on my reported
+            // ticket, or the reverse), the new row replaces the old one.
+            try run("DELETE FROM items WHERE source = 'jira' AND external_id = ?",
+                    (st.viaReport ? "mention:" : "reported:") + st.key)
             let existing = try itemId(source: .jira, externalId: ext)
             let wasHidden = try existing.map { try isDismissed($0) } ?? false
             let previous = try changeMarker(source: .jira, externalId: ext)
             let item = try upsert(source: .jira, externalId: ext, title: st.summary,
-                                  detail: "\(st.key) · \(st.mentionedBy) mentioned you",
+                                  detail: "\(st.key) · \(st.mentionedBy) " + (st.viaReport ? "commented" : "mentioned you"),
                                   url: site?.appendingPathComponent("browse/\(st.key)"),
                                   lastMyResponse: nil, changeMarker: st.marker, now: now)
             try run("UPDATE items SET waiting_since = COALESCE(waiting_since, ?) WHERE id = ?",
@@ -459,20 +466,25 @@ public final class Store {
             }
         }
         for key in remove where limitTo?.contains(key) ?? !key.hasPrefix("DEMO-") {
-            try run("DELETE FROM items WHERE source = 'jira' AND external_id = ?", "mention:\(key)")
+            try run("DELETE FROM items WHERE source = 'jira' AND external_id IN (?, ?)", "mention:\(key)", "reported:\(key)")
         }
         return popped
     }
 
     /// Mention keys currently in the queue (without the "mention:" prefix).
     public func mentionKeys() throws -> Set<String> {
-        Set(try externalIds(source: .jira).map(\.1).filter { $0.hasPrefix("mention:") && !$0.contains("DEMO-") }
-            .map { String($0.dropFirst(8)) })
+        Set(try externalIds(source: .jira).map(\.1).filter { !$0.contains("DEMO-") }.compactMap(Self.mentionKey))
     }
 
     /// Deletes every real Jira row (Jira disconnected).
     public func deleteJiraItems() throws {
         try run("DELETE FROM items WHERE source = 'jira' AND external_id NOT LIKE '%DEMO-%'")
+    }
+
+    /// The ticket key of a mention-style row ("mention:KEY" or "reported:KEY"), else nil.
+    public static func mentionKey(_ externalId: String) -> String? {
+        for p in ["mention:", "reported:"] where externalId.hasPrefix(p) { return String(externalId.dropFirst(p.count)) }
+        return nil
     }
 
     public func deleteMentionItems() throws {
