@@ -207,3 +207,9 @@ private func ticket(_ key: String, waiting: Bool = false) -> JiraTicketState {
     #expect(JiraClient.looksLikeAccountId("640ba5109cba7ca0287bf77b"))
     #expect(!JiraClient.looksLikeAccountId("bot@example.com"))
 }
+
+@Test func issueDecodesLiveStatusCategory() throws {
+    let json = #"{"key":"ABC-1","fields":{"summary":"s","status":{"statusCategory":{"key":"done"}}}}"#
+    let issue = try JSONDecoder().decode(JiraIssue.self, from: Data(json.utf8))
+    #expect(issue.statusCategory == "done")
+}

@@ -39,15 +39,25 @@ public struct JiraComment: Decodable, Equatable, Sendable {
 public struct JiraIssue: Decodable, Sendable {
     public let key: String
     public let summary: String
+    /// The ticket's own status category key ("new", "indeterminate", "done"), when fetched.
+    /// Jira's search index can lag a status change by minutes, so a JQL status filter may
+    /// still match a ticket that was just closed; this field is the live value.
+    public let statusCategory: String?
 
-    private struct Fields: Decodable { let summary: String? }
+    private struct Category: Decodable { let key: String? }
+    private struct Status: Decodable { let statusCategory: Category? }
+    private struct Fields: Decodable { let summary: String?; let status: Status? }
     private enum CodingKeys: String, CodingKey { case key, fields }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         key = try c.decode(String.self, forKey: .key)
-        summary = (try? c.decode(Fields.self, forKey: .fields).summary) ?? key
+        let f = try? c.decode(Fields.self, forKey: .fields)
+        summary = f?.summary ?? key
+        statusCategory = f?.status?.statusCategory?.key
     }
-    public init(key: String, summary: String) { self.key = key; self.summary = summary }
+    public init(key: String, summary: String, statusCategory: String? = nil) {
+        self.key = key; self.summary = summary; self.statusCategory = statusCategory
+    }
 }
 
 // MARK: - Classification (pure, unit tested)
@@ -171,7 +181,7 @@ public struct JiraClient: Sendable {
         var token: String?
         repeat {
             var q = [URLQueryItem(name: "jql", value: "assignee = currentUser() AND sprint in openSprints() AND statusCategory = \"\(statusCategory)\""),
-                     URLQueryItem(name: "fields", value: "summary"),
+                     URLQueryItem(name: "fields", value: "summary,status"),
                      URLQueryItem(name: "maxResults", value: "100")]
             if let token { q.append(URLQueryItem(name: "nextPageToken", value: token)) }
             let page: Page = try await get("/rest/api/3/search/jql", query: q)
@@ -241,8 +251,12 @@ public struct JiraClient: Sendable {
                             now: Date = Date(),
                             maxConcurrent: Int = 8) async throws -> JiraSyncResult {
         let me = try await myself().accountId
-        let issues = try await sprintIssues()
+        // Trust each ticket's own status over the search filter (the index lags): a ticket
+        // the index still calls In Progress but that is already Done counts as Done now.
+        let started = try await sprintIssues()
+        let issues = started.filter { $0.statusCategory != "done" }
         let done = try await sprintIssues(statusCategory: "Done").map(\.key)
+            + started.filter { $0.statusCategory == "done" }.map(\.key)
         let ignored = Set(config.ignoredAccountIds)
         var results: [String: [JiraComment]] = [:]
         try await withThrowingTaskGroup(of: (String, [JiraComment]).self) { group in
