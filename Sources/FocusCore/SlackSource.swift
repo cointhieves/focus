@@ -12,6 +12,9 @@ public final class SlackSource: @unchecked Sendable {
     /// User groups I'm in (ids), refreshed hourly. Empty if the token lacks usergroups:read
     /// (connected before that permission was added): group mentions are then skipped.
     private var myGroups: [String] = []
+    /// For my groups: members and @handle, used to tell when the team picked up a group tag.
+    private var groupMembers: [String: Set<String>] = [:]
+    private var groupHandles: [String: String] = [:]
     private var groupsFetchedAt = Date.distantPast
 
     public init(client: SlackClient = SlackClient(), token: String, me: String) {
@@ -23,6 +26,8 @@ public final class SlackSource: @unchecked Sendable {
         let s = SlackSource(client: client, token: token, me: me)
         s.users = users
         s.myGroups = myGroups
+        s.groupMembers = groupMembers
+        s.groupHandles = groupHandles
         s.groupsFetchedAt = groupsFetchedAt
         return s
     }
@@ -146,10 +151,77 @@ public final class SlackSource: @unchecked Sendable {
         guard now.timeIntervalSince(groupsFetchedAt) > 3600 else { return myGroups }
         if let j = try? await call("usergroups.list", ["include_users": "true"]) {
             let all = (j["usergroups"] as? [[String: Any]]) ?? []
-            myGroups = all.filter { (($0["users"] as? [String]) ?? []).contains(me) }.compactMap { $0["id"] as? String }
+            let mine = all.filter { (($0["users"] as? [String]) ?? []).contains(me) }
+            myGroups = mine.compactMap { $0["id"] as? String }
+            groupMembers = [:]; groupHandles = [:]
+            for g in mine {
+                guard let id = g["id"] as? String else { continue }
+                groupMembers[id] = Set((g["users"] as? [String]) ?? [])
+                groupHandles[id] = g["handle"] as? String
+            }
         }
         groupsFetchedAt = now   // on failure too, so it isn't retried every sync
         return myGroups
+    }
+
+    /// True if a message really tags me or one of `groups`, checked in the message itself.
+    /// Slack's search for `<!subteam^ID>` also returns messages tagging OTHER groups, so a
+    /// search hit alone is not proof.
+    static func tags(_ m: [String: Any], me: String, groups: Set<String>) -> Bool {
+        tagsMe(m, me: me) || !taggedGroups(m).isDisjoint(with: groups)
+    }
+
+    /// True if the message @mentions me personally (text or blocks).
+    static func tagsMe(_ m: [String: Any], me: String) -> Bool {
+        let text = m["text"] as? String ?? ""
+        if text.contains("<@\(me)>") || text.contains("<@\(me)|") { return true }
+        func walk(_ x: Any?) -> Bool {
+            if let d = x as? [String: Any] {
+                if d["type"] as? String == "user", d["user_id"] as? String == me { return true }
+                return d.values.contains { walk($0) }
+            }
+            if let a = x as? [Any] { return a.contains { walk($0) } }
+            return false
+        }
+        return walk(m["blocks"])
+    }
+
+    /// Every user group the message tags (text `<!subteam^ID` and blocks).
+    static func taggedGroups(_ m: [String: Any]) -> Set<String> {
+        var out = Set<String>()
+        let text = m["text"] as? String ?? ""
+        var rest = Substring(text)
+        while let r = rest.range(of: "<!subteam^") {
+            let tail = rest[r.upperBound...]
+            let id = tail.prefix { $0 != "|" && $0 != ">" }
+            if !id.isEmpty { out.insert(String(id)) }
+            rest = tail
+        }
+        func walk(_ x: Any?) {
+            if let d = x as? [String: Any] {
+                if d["type"] as? String == "usergroup", let g = d["usergroup_id"] as? String { out.insert(g) }
+                d.values.forEach(walk)
+            } else if let a = x as? [Any] { a.forEach(walk) }
+        }
+        walk(m["blocks"])
+        return out
+    }
+
+    /// Pure rule: a group tag at `ts` is picked up once someone in `members` replies in its
+    /// thread after it (thread `messages` include the root).
+    static func groupPickedUp(messages: [[String: Any]], after ts: Double, members: Set<String>) -> Bool {
+        messages.contains { (Self.ts($0["ts"]) ?? 0) > ts && members.contains($0["user"] as? String ?? "") }
+    }
+
+    /// A tag of my group(s) is handled when a member of one of those groups (me included)
+    /// replies in its thread after it, or when I reacted to it.
+    func groupTagHandled(_ channel: String, _ ts: String, root: String, groups: Set<String>) async throws -> Bool {
+        let members = groups.reduce(into: Set([me])) { $0.formUnion(groupMembers[$1] ?? []) }
+        if let r = try? await call("conversations.replies", ["channel": channel, "ts": root, "limit": "200"]),
+           Self.groupPickedUp(messages: (r["messages"] as? [[String: Any]]) ?? [], after: Self.ts(ts) ?? 0, members: members) {
+            return true
+        }
+        return reactedByMe(await message(channel, ts, root: root))
     }
 
     /// First readable text in Block Kit blocks: a header, else a section's text or first field.
@@ -179,6 +251,13 @@ public final class SlackSource: @unchecked Sendable {
     /// One top-level message (for its reactions).
     func message(_ channel: String, _ ts: String) async -> [String: Any]? {
         let j = try? await call("conversations.history", ["channel": channel, "latest": ts, "inclusive": "true", "limit": "1"])
+        return (j?["messages"] as? [[String: Any]])?.first { ($0["ts"] as? String) == ts }
+    }
+
+    /// A message that may be a thread reply (history doesn't return replies, so use the thread).
+    func message(_ channel: String, _ ts: String, root: String) async -> [String: Any]? {
+        guard root != ts else { return await message(channel, ts) }
+        let j = try? await call("conversations.replies", ["channel": channel, "ts": root, "limit": "200"])
         return (j?["messages"] as? [[String: Any]])?.first { ($0["ts"] as? String) == ts }
     }
 
@@ -230,8 +309,9 @@ public final class SlackSource: @unchecked Sendable {
         //    or a reaction.
         var threads: [String: (channel: String, tts: String)] = [:]
         if kinds.contains("mention") || kinds.contains("thread") {
+            let myGroupIds = Set(await groups(now: now))
             var queries = ["<@\(me)>"]
-            queries += await groups(now: now).map { "<!subteam^\($0)>" }
+            queries += myGroupIds.map { "<!subteam^\($0)>" }
             var seen = Set<String>()
             var matches: [[String: Any]] = []
             for q in queries {
@@ -240,7 +320,7 @@ public final class SlackSource: @unchecked Sendable {
                     if seen.insert(id).inserted { matches.append(m) }
                 }
             }
-            for m in matches {
+            for m in matches where Self.tags(m, me: me, groups: myGroupIds) {
                 note(m)
                 let ch = m["channel"] as? [String: Any]
                 guard let c = ch?["id"] as? String, ch?["is_im"] as? Bool != true, ch?["is_mpim"] as? Bool != true,
@@ -262,6 +342,27 @@ public final class SlackSource: @unchecked Sendable {
                     if who.isEmpty { who = await user(m["user"] as? String ?? "").name }
                     states.append(SlackItemState(key: key, title: "\(who) in #\(channelNames[c] ?? "channel"): \(await alertText(m))",
                                                  detail: "mention · #\(channelNames[c] ?? "channel")",
+                                                 url: (m["permalink"] as? String).flatMap(URL.init(string:)),
+                                                 waitingSince: Date(timeIntervalSince1970: t), marker: tsS))
+                    continue
+                }
+                // Tags only my group(s), not me: one item for that message, cleared when someone
+                // in the group picks it up. It doesn't pull me into the thread.
+                if !Self.tagsMe(m, me: me) {
+                    guard kinds.contains("mention") else { continue }
+                    let groups = Self.taggedGroups(m).intersection(myGroupIds)
+                    let root = Self.threadParam(m["permalink"] as? String) ?? tsS
+                    let key = "mention:\(c):\(tsS):\(root)"
+                    handled.insert(key)
+                    if try await groupTagHandled(c, tsS, root: root, groups: groups) {
+                        if open[key] != nil { answered.insert(key) }
+                        continue
+                    }
+                    let who = await user(m["user"] as? String ?? "").name
+                    let handle = groups.compactMap { groupHandles[$0] }.sorted().first.map { "@\($0)" } ?? "your group"
+                    let chan = "#\(channelNames[c] ?? "channel")"
+                    states.append(SlackItemState(key: key, title: "\(who) tagged \(handle) in \(chan): \(await text(m))",
+                                                 detail: "mention · \(chan)",
                                                  url: (m["permalink"] as? String).flatMap(URL.init(string:)),
                                                  waitingSince: Date(timeIntervalSince1970: t), marker: tsS))
                     continue
@@ -381,6 +482,12 @@ public final class SlackSource: @unchecked Sendable {
             switch p[0] {
             case "dm", "group":
                 if try await repliedOrReacted((myLatest[c] ?? 0) > t, c, marker) { answered.insert(key) }
+            case "mention" where p.count == 4:
+                // A group tag: done once the group picked it up (or the message is gone).
+                let groups: Set<String>
+                if let m = await message(c, p[2], root: p[3]) { groups = Self.taggedGroups(m).intersection(myGroups) }
+                else { answered.insert(key); continue }
+                if try await groupTagHandled(c, p[2], root: p[3], groups: groups) { answered.insert(key) }
             case "mention" where p.count == 3:
                 if try await repliedOrReacted((myLatest[c] ?? 0) > t || myLatest["\(c):\(p[2])"] != nil, c, p[2]) {
                     answered.insert(key)

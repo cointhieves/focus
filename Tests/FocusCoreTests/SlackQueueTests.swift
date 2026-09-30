@@ -163,3 +163,33 @@ private let all = Set(SlackKind.all)
     // Someone else's reaction doesn't count.
     #expect(SlackSource.lastResponse(myLastMessage: 0, messages: [["ts": "5.0", "reactions": [["users": ["U-b"]]]]], me: me) == 0)
 }
+
+@Test func groupSearchHitMustReallyTagMyGroup() {
+    let other: [String: Any] = ["text": "cc <!subteam^S_OTHER|@other-team> nvm",
+                                "blocks": [["type": "rich_text", "elements": [["type": "rich_text_section",
+                                    "elements": [["type": "usergroup", "usergroup_id": "S_OTHER"]]]]]]]
+    #expect(!SlackSource.tags(other, me: "U_ME", groups: ["S_MINE"]))
+    let mine: [String: Any] = ["text": "", "blocks": [["type": "rich_text", "elements": [["type": "rich_text_section",
+                                    "elements": [["type": "usergroup", "usergroup_id": "S_MINE"]]]]]]]
+    #expect(SlackSource.tags(mine, me: "U_ME", groups: ["S_MINE"]))
+    #expect(SlackSource.tags(["text": "hey <@U_ME>"], me: "U_ME", groups: []))
+}
+
+@Test func groupTagClearsOnlyWhenAMemberReplies() {
+    let thread: [[String: Any]] = [["ts": "100.0", "user": "U_ASKER"],
+                                   ["ts": "200.0", "user": "U_ASKER"],     // the tag
+                                   ["ts": "300.0", "user": "U_OUTSIDER"]]
+    #expect(!SlackSource.groupPickedUp(messages: thread, after: 200, members: ["U_TEAMMATE", "U_ME"]))
+    let answered = thread + [["ts": "400.0", "user": "U_TEAMMATE"]]
+    #expect(SlackSource.groupPickedUp(messages: answered, after: 200, members: ["U_TEAMMATE", "U_ME"]))
+    // A member's reply BEFORE the tag doesn't count.
+    let early: [[String: Any]] = [["ts": "150.0", "user": "U_TEAMMATE"], ["ts": "200.0", "user": "U_ASKER"]]
+    #expect(!SlackSource.groupPickedUp(messages: early, after: 200, members: ["U_TEAMMATE"]))
+}
+
+@Test func taggedGroupsAndPersonalTagAreSeparate() {
+    let m: [String: Any] = ["text": "hi <!subteam^S_A|@a> and <!subteam^S_B>"]
+    #expect(SlackSource.taggedGroups(m) == ["S_A", "S_B"])
+    #expect(!SlackSource.tagsMe(m, me: "U_ME"))
+    #expect(SlackSource.tagsMe(["text": "<@U_ME|me> look"], me: "U_ME"))
+}

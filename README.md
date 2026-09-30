@@ -16,6 +16,12 @@ tool drives the same queue, which is handy for scripts and AI agents.
 Most recent first. To update, pull the latest code and run `make install` again.
 
 **September 30, 2026**
+- **Team tags are handled once your team answers.** When someone tags a Slack group you're
+  in (not you personally), Focus shows that one message and clears it once a member of the
+  group replies in its thread. It no longer drags you into every later reply. Tags of
+  groups you're not in no longer show up at all.
+- **New: [What shows up in Focus, and why](docs/WHAT-SHOWS-UP.md).** Every rule in one
+  place, with an FAQ.
 - **Tickets you reported in other teams' queues.** A new **Tickets I reported** checkbox (on
   by default) pops a ticket you opened in another team's project (a support or service
   queue, say) when someone comments after you without tagging someone else, even if they
@@ -133,7 +139,9 @@ app is built locally, it asks again after each rebuild.
 - **Add a task** with **+ Add** at the bottom, or click the panel and press Return.
   Writing "by 5pm" or "in 30 min" in the text sets a deadline.
 - Slack items clear when you reply or react with an emoji. Jira tickets clear when you
-  comment, and come back a business day later if nothing else has happened.
+  comment, and come back at the start of your next workday if nothing else has happened.
+- **Why did something show up, or not?** [docs/WHAT-SHOWS-UP.md](docs/WHAT-SHOWS-UP.md)
+  has every rule for Jira and Slack, plus an FAQ.
 - **Settings → Try it** runs every behavior on demo items, so you can see what each one
   looks like without waiting for it to happen for real.
 
