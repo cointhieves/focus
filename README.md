@@ -11,6 +11,36 @@ above everything else, but among those, the oldest still comes first. Colors sho
 something has waited in business hours: green, then amber, then red. A `focus` command line
 tool drives the same queue, which is handy for scripts and AI agents.
 
+## What's new
+
+Most recent first. To update, pull the latest code and run `make install` again.
+
+**September 30, 2026**
+- **Jira settings work like Slack's.** Connect with **Connect Jira**; once connected, the
+  email and token fields tuck away and you get **Reconnect** and **Disconnect**. Disconnect
+  removes your token from the Keychain and clears your Jira items (your email is kept).
+- **Choose which Jira items show.** A new **Show** row has **Sprint tickets** and
+  **Mentions** checkboxes. Unticking one hides those items; ticking it again brings them
+  back as they were.
+- **Settings save as you go.** No more Save & Test: every change saves right away. The API
+  token saves when you click Connect Jira (or press Return), since it has to be checked first.
+- **Easier lists.** "Bot alerts from" (Slack) and "Ignore comments from" (Jira) are now lists:
+  type an entry, press Return, and remove one with its minus button. No more commas.
+- **Advanced opens with one click.** Click anywhere on the word "Advanced", not just the
+  small arrow. The Settings window also grows and shrinks with its contents instead of
+  shifting things out from under your cursor.
+- **Consistent status lines.** Both sections now say "Synced at 9:56 AM: 2 tickets need you"
+  (or "conversations"). The spinner only appears while connecting, not on every sync.
+
+**September 29, 2026**
+- **Jira token check.** Connecting without a token now tells you so, and a newly saved token
+  is checked to make sure it really went into the Keychain.
+- **Reactions count as a reply in Slack.** Reacting to any message in a conversation counts
+  as responding, not just reacting to the newest one, so the waiting time is measured correctly.
+- **No more double items for thread replies.** A reply in a DM thread shows once, as the
+  thread, and replying in the thread clears it. Threads in group DMs get a readable name.
+- **First public release.**
+
 ## Install
 
 Needs macOS 13 or later and the Xcode Command Line Tools (`xcode-select --install`). You
@@ -67,8 +97,8 @@ Settings.
   **⌃⌥F** (Control-Option-F) from any app, middle-click the crosshair icon, or click it
   and choose Show / Hide Focus.
 
-- **Jira:** turn on "Show my sprint tickets", enter your email and an Atlassian API token
-  (Settings has a link to create one), then click Save & Test. The token is stored in your
+- **Jira:** turn on "Show my Jira tickets", enter your email and an Atlassian API token
+  (Settings has a link to create one), then click Connect Jira. The token is stored in your
   Keychain.
 - **Slack:** turn on "Show my Slack messages" and click Connect Slack, then sign in and
   click Allow in the browser. Focus only reads; it never posts.

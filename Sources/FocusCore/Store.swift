@@ -137,6 +137,7 @@ public final class Store {
         let slackOff = try pref("slack_enabled") == "0"
         let jiraOff = try pref("jira_enabled") == "0"
         let mentionsOff = try pref("jira_mentions") == "0"
+        let sprintOff = try pref("jira_sprint") == "0"
         let kinds = try pref("slack_kinds").map { Set($0.split(separator: ",").map(String.init)) }
         return { item in
             let ext = item.externalId ?? ""
@@ -148,7 +149,7 @@ public final class Store {
                 return true
             case .jira:
                 if jiraOff { return false }
-                return !(mentionsOff && ext.hasPrefix("mention:"))
+                return ext.hasPrefix("mention:") ? !mentionsOff : !sprintOff
             case .idea: return true
             }
         }
@@ -467,6 +468,11 @@ public final class Store {
     public func mentionKeys() throws -> Set<String> {
         Set(try externalIds(source: .jira).map(\.1).filter { $0.hasPrefix("mention:") && !$0.contains("DEMO-") }
             .map { String($0.dropFirst(8)) })
+    }
+
+    /// Deletes every real Jira row (Jira disconnected).
+    public func deleteJiraItems() throws {
+        try run("DELETE FROM items WHERE source = 'jira' AND external_id NOT LIKE '%DEMO-%'")
     }
 
     public func deleteMentionItems() throws {

@@ -15,6 +15,11 @@ public enum Keychain {
         try save(Data(token.utf8), service: jiraService, account: "api-token", label: "Focus – Jira API token")
     }
 
+    public static func deleteToken() {
+        SecItemDelete([kSecClass as String: kSecClassGenericPassword,
+                       kSecAttrService as String: jiraService] as CFDictionary)
+    }
+
     public static func readSlackTokens() -> SlackTokens? {
         read(service: slackService, account: "user-token")
             .flatMap { try? JSONDecoder().decode(SlackTokens.self, from: $0) }

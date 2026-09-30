@@ -228,3 +228,17 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
                                      waitingSince: t0, marker: "1")], answered: [], kinds: Set(SlackKind.all))
     #expect(try titles(s) == ["new dm", "old ticket with reply"])
 }
+
+@Test func sprintOffHidesSprintTicketsButNotMentions() throws {
+    let s = try Store(path: tempStorePath())
+    let sprint = JiraTicketState(key: "K-1", summary: "sprint", myLastComment: nil, waitingOnMe: false, changeMarker: "none")
+    try s.applyJira([sprint], inScopeKeys: ["K-1"], site: nil)
+    _ = try s.applyJiraMentions([JiraMentionState(key: "K-2", summary: "mention", mentionedBy: "a",
+                                                  waitingSince: Date(), marker: "m1")], remove: [], site: nil)
+    try s.setPref("jira_sprint", "0")
+    #expect(try s.queue().map { $0.externalId ?? "" } == ["mention:K-2"])
+    try s.setPref("jira_sprint", "1")
+    #expect(try s.queue().count == 2)
+    try s.deleteJiraItems()
+    #expect(try s.queue().isEmpty)
+}

@@ -318,8 +318,8 @@ struct SlackSettingsSection: View {
                 set: { model.setSlackEnabled($0) }))
             if model.slackEnabled {
                 HStack {
-                    if model.slackBusy { ProgressView().controlSize(.small) }
                     Spacer()
+                    if model.slackBusy { ProgressView().controlSize(.small) }
                     if model.slackConnected {
                         Button("Disconnect") { model.disconnectSlack() }.fixedSize()
                     }
@@ -361,12 +361,13 @@ struct SlackSettingsSection: View {
     }
 }
 
-/// Jira connection settings. Edits are local until "Save & Test".
+/// Jira: same shape as Slack. On/off, then what's needed to connect, then which kinds
+/// show, Advanced, and status last. Every change saves right away; Connect tests the token.
 struct JiraSettingsSection: View {
     @ObservedObject var model: QueueModel
-    @State private var config = JiraConfig()
     @State private var token = ""
-    @State private var loaded = false
+    /// Reconnect shows the email/token fields again while already connected.
+    @State private var editing = false
 
     private var failed: Bool { model.jiraStatus.contains("failed") }
     private var statusIcon: String {
@@ -378,53 +379,70 @@ struct JiraSettingsSection: View {
         failed ? .red : model.jiraStatus.hasPrefix("Connected") || model.jiraStatus.hasPrefix("Synced") ? .green : .secondary
     }
 
+    private func connect() {
+        model.saveJira(model.jiraConfig, newToken: token)
+        token = ""
+        editing = false
+    }
+
     var body: some View {
         Section {
-            // Takes effect immediately; the fields below still use Save & Test.
-            Toggle("Show my sprint tickets", isOn: Binding(
+            Toggle("Show my Jira tickets", isOn: Binding(
                 get: { model.jiraConfig.enabled },
-                set: { on in
-                    config.enabled = on
-                    model.setJiraEnabled(on)
-                }))
-            Toggle(isOn: Binding(get: { model.jiraMentionsOn }, set: { model.setJiraMentions($0) })) {
-                Text("Also show @mentions on other tickets")
-                Text("Any ticket where someone mentioned you and you haven't commented since.")
-            }
-            TextField("Email", text: $config.email, prompt: Text("you@company.com"))
-            SecureField("API token", text: $token,
-                        prompt: Text(model.hasJiraToken ? "Saved in Keychain (type to replace)" : "Paste token"))
-            HStack {
-                Link("Create an API token", destination: URL(string: "https://id.atlassian.com/manage-profile/security/api-tokens")!)
-                Spacer()
-                if model.jiraTesting { ProgressView().controlSize(.small) }
-                Button("Save & Test") {
-                    config.ignoredAccountIds = model.jiraConfig.ignoredAccountIds   // saved on its own
-                    model.saveJira(config, newToken: token)
-                    token = ""
+                set: { model.setJiraEnabled($0) }))
+            if model.jiraConfig.enabled {
+                if !model.jiraConnected || editing {
+                    TextField("Email", text: Binding(get: { model.jiraConfig.email },
+                                                     set: { model.setJiraEmail($0) }),
+                              prompt: Text("you@company.com"))
+                    SecureField("API token", text: $token,
+                                prompt: Text(model.hasJiraToken ? "Saved in Keychain (type to replace)" : "Paste your API token"))
+                        .onSubmit(connect)
                 }
-                .fixedSize()
+                HStack {
+                    if !model.jiraConnected || editing {
+                        Link("Create an API token", destination: URL(string: "https://id.atlassian.com/manage-profile/security/api-tokens")!)
+                    }
+                    Spacer()
+                    if model.jiraTesting { ProgressView().controlSize(.small) }
+                    if model.jiraConnected {
+                        Button("Disconnect") { model.disconnectJira(); token = ""; editing = false }.fixedSize()
+                    }
+                    if model.jiraConnected && !editing {
+                        Button("Reconnect") { editing = true }.fixedSize()
+                    } else {
+                        Button("Connect Jira", action: connect)
+                            .fixedSize()
+                            .keyboardShortcut(.defaultAction)
+                    }
+                }
             }
-            AdvancedGroup {
-                EditableList(title: "Ignore comments from", prompt: "Type an Atlassian account ID and press Return",
-                             items: model.jiraConfig.ignoredAccountIds,
-                             onChange: { model.setJiraIgnored($0) })
-                Text("Comments from these Atlassian accounts (bots posting as people) never count as a reply. Changes save right away.")
-                    .font(.caption).foregroundStyle(.secondary)
+            if model.jiraConfig.enabled && model.jiraConnected {
+                LabeledContent("Show") {
+                    HStack(spacing: 12) {
+                        Toggle("Sprint tickets", isOn: Binding(get: { model.jiraSprintOn }, set: { model.setJiraSprint($0) }))
+                            .toggleStyle(.checkbox)
+                            .help("In Progress tickets in your active sprint")
+                        Toggle("Mentions", isOn: Binding(get: { model.jiraMentionsOn }, set: { model.setJiraMentions($0) }))
+                            .toggleStyle(.checkbox)
+                            .help("Any ticket where someone mentioned you and you haven't commented since")
+                    }
+                }
+                AdvancedGroup {
+                    EditableList(title: "Ignore comments from", prompt: "Type an Atlassian account ID and press Return",
+                                 items: model.jiraConfig.ignoredAccountIds,
+                                 onChange: { model.setJiraIgnored($0) })
+                    Text("Comments from these Atlassian accounts (bots posting as people) never count as a reply. Changes save right away.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
-            // Result of the last test/sync, last in the section (same as Slack).
             Label(model.jiraStatus, systemImage: statusIcon)
                 .foregroundStyle(statusColor)
         } header: {
             Text("Jira")
         } footer: {
-            Text("Save & Test signs you in as yourself: your own API token, kept in this Mac's Keychain, reading only what you can already see in Jira. Nobody else can use it. Turning this off keeps your token saved. Syncs every 15 seconds.")
+            Text("Connect signs you in as yourself: your own API token, kept in this Mac's Keychain, reading only what you can already see in Jira. Nobody else can use it. Turning this off keeps you signed in; Disconnect removes the token. Syncs every 15 seconds.")
                 .font(.caption).foregroundStyle(.secondary)
-        }
-        .onAppear {
-            guard !loaded else { return }
-            loaded = true
-            config = model.jiraConfig
         }
     }
 }

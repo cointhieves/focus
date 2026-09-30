@@ -123,6 +123,7 @@ final class QueueModel: ObservableObject {
         }
         syncJira()
         jiraMentionsOn = (try? store.pref("jira_mentions")) != "0"
+        jiraSprintOn = (try? store.pref("jira_sprint")) != "0"
         slackEnabled = (try? store.pref("slack_enabled")) == "1"
         if let saved = try? store.pref("slack_bot_channels") {
             slackBotChannels = Set(saved.split(separator: ",").map(String.init))
@@ -217,7 +218,7 @@ final class QueueModel: ObservableObject {
     /// One-line status for Settings: last sync result or the error.
     @Published private(set) var jiraStatus = "Not connected"
     @Published private(set) var jiraSyncing = false
-    /// Only while Save & Test checks the credentials (drives the spinner); routine syncs don't show one.
+    /// Only while Connect checks the credentials (drives the spinner); routine syncs don't show one.
     @Published private(set) var jiraTesting = false
 
     /// Token read from the Keychain at most once per launch. Each Keychain read can
@@ -232,6 +233,29 @@ final class QueueModel: ObservableObject {
         return cachedToken
     }
     var hasJiraToken: Bool { jiraToken != nil }
+    /// Email and token both saved (the Jira equivalent of Slack's "connected").
+    var jiraConnected: Bool { hasJiraToken && !jiraConfig.email.isEmpty }
+
+    /// Saves the email as it's typed (no Save button).
+    func setJiraEmail(_ email: String) {
+        var c = jiraConfig
+        c.email = email
+        do {
+            try store.saveJiraConfig(c)
+            jiraConfig = try store.loadJiraConfig()
+        } catch {
+            jiraStatus = "Save failed: \(error)"
+        }
+    }
+
+    /// Removes the saved token and this Mac's Jira rows. The email is kept.
+    func disconnectJira() {
+        Keychain.deleteToken()
+        cachedToken = nil
+        tokenLoaded = true
+        write { try store.deleteJiraItems() }
+        jiraStatus = "Not connected"
+    }
 
     /// Saves the Jira settings (and the token, if a new one was typed), then tests and syncs.
     func saveJira(_ config: JiraConfig, newToken: String) {
@@ -247,7 +271,7 @@ final class QueueModel: ObservableObject {
                 cachedToken = token
                 tokenLoaded = true
             } else if !hasJiraToken {
-                jiraStatus = "No API token entered. Paste it into the API token field, then Save & Test."
+                jiraStatus = "No API token entered. Paste it into the API token field, then click Connect Jira."
                 try store.saveJiraConfig(config)
                 jiraConfig = try store.loadJiraConfig()
                 return
@@ -261,7 +285,7 @@ final class QueueModel: ObservableObject {
         testJira()
     }
 
-    /// Saves the ignored-accounts list right away (no Save & Test needed).
+    /// Saves the ignored-accounts list right away (no Connect needed).
     func setJiraIgnored(_ ids: [String]) {
         var c = jiraConfig
         c.ignoredAccountIds = ids
@@ -315,7 +339,7 @@ final class QueueModel: ObservableObject {
                     jiraStatus = "Connected as \(name). Syncing…"
                     syncJira()
                 } else {
-                    jiraStatus = "Connected as \(name). Turn on \"Show my sprint tickets\" to add them to Focus."
+                    jiraStatus = "Connected as \(name). Turn on \"Show my Jira tickets\" to add them to Focus."
                 }
             } catch {
                 jiraSyncing = false
@@ -376,6 +400,15 @@ final class QueueModel: ObservableObject {
 
     /// Whether mentions on tickets outside my sprint show. On by default.
     @Published private(set) var jiraMentionsOn = true
+
+    /// Whether tickets in my active sprint show. On by default.
+    @Published private(set) var jiraSprintOn = true
+
+    func setJiraSprint(_ on: Bool) {
+        try? store.setPref("jira_sprint", on ? "1" : "0")
+        jiraSprintOn = on
+        if on { jiraQuiet = true; syncJira() } else { reload() }   // hidden, not deleted
+    }
 
     func setJiraMentions(_ on: Bool) {
         try? store.setPref("jira_mentions", on ? "1" : "0")
