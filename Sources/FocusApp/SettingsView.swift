@@ -7,6 +7,8 @@ struct SettingsView: View {
     let onResetPosition: () -> Void
     /// Fixed height when the form is taller than the screen (it scrolls). Nil = natural height.
     var height: CGFloat? = nil
+    /// Called with the content's natural height whenever it changes (e.g. Advanced opens).
+    var onHeight: (CGFloat) -> Void = { _ in }
 
     /// Binding to one settings field that saves through the model on every change.
     private func binding(_ key: WritableKeyPath<FocusSettings, Double>) -> Binding<Double> {
@@ -34,6 +36,10 @@ struct SettingsView: View {
             }
         }
         .padding(.vertical, 8)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: SettingsContentHeight.self, value: g.size.height)
+        })
+        .onPreferenceChange(SettingsContentHeight.self) { onHeight($0) }
         .modifier(SettingsHeight(height: height))
     }
 
@@ -209,6 +215,11 @@ struct SettingsView: View {
 
 }
 
+private struct SettingsContentHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 private struct SettingsHeight: ViewModifier {
     let height: CGFloat?
     func body(content: Content) -> some View {
@@ -220,11 +231,81 @@ private struct SettingsHeight: ViewModifier {
     }
 }
 
+/// "Advanced" disclosure where the whole row (word included) toggles it, not only the
+/// small chevron, which is all a plain DisclosureGroup responds to on macOS.
+struct AdvancedGroup<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    @State private var open = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $open, content: content) {
+            Button { withAnimation { open.toggle() } } label: {
+                Text("Advanced").frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+/// A small editable list: type an entry, press Return (or +) to add it, minus to remove.
+/// Entries are trimmed, run through `normalize`, and deduplicated. `onChange` gets the
+/// whole new list and is expected to save it.
+struct EditableList: View {
+    let title: String
+    let prompt: String
+    let items: [String]
+    var normalize: (String) -> String = { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    let onChange: ([String]) -> Void
+    @State private var draft = ""
+
+    private func add() {
+        let value = normalize(draft)
+        draft = ""
+        guard !value.isEmpty, !items.contains(value) else { return }
+        onChange(items + [value])
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+            HStack {
+                TextField(title, text: $draft, prompt: Text(prompt))
+                    .labelsHidden()
+                    .onSubmit(add)
+                Button(action: add) { Image(systemName: "plus") }
+                    .disabled(normalize(draft).isEmpty)
+                    .help("Add")
+            }
+            if !items.isEmpty {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(items, id: \.self) { item in
+                            HStack {
+                                Text(item).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+                                Spacer()
+                                Button { onChange(items.filter { $0 != item }) } label: {
+                                    Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Remove")
+                            }
+                            .padding(.vertical, 4).padding(.horizontal, 8)
+                            if item != items.last { Divider() }
+                        }
+                    }
+                }
+                // About five rows visible, then it scrolls.
+                .frame(maxHeight: 130)
+                .fixedSize(horizontal: false, vertical: items.count <= 5)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+}
+
 /// Slack: on/off, connect, which kinds show, and channels whose bot alerts count.
 struct SlackSettingsSection: View {
     @ObservedObject var model: QueueModel
-    @State private var botChannels = ""
-    @State private var loadedBots = false
 
     private var ok: Bool { model.slackStatus.hasPrefix("Connected") || model.slackStatus.hasPrefix("Synced") }
     private var bad: Bool { ["failed", "expired", "not completed", "Could not"].contains { model.slackStatus.contains($0) } }
@@ -259,16 +340,13 @@ struct SlackSettingsSection: View {
                 }
             }
             if model.slackEnabled && model.slackConnected {
-                DisclosureGroup("Advanced") {
-                    TextField("Bot alerts from", text: $botChannels, prompt: Text("channel names, comma separated"))
-                        .onSubmit { model.setSlackBotChannels(botChannels) }
-                    Text("Bots are ignored except in these channels, where an alert that mentions you or one of your groups shows up. React or reply in its thread to clear it. Press Return to save.")
+                AdvancedGroup {
+                    EditableList(title: "Bot alerts from", prompt: "Type a channel name and press Return",
+                                 items: model.slackBotChannels.sorted(),
+                                 normalize: SlackSource.channelKey,
+                                 onChange: { model.setSlackBotChannels($0) })
+                    Text("Bots are ignored except in these channels, where an alert that mentions you or one of your groups shows up. React or reply in its thread to clear it. Changes save right away.")
                         .font(.caption).foregroundStyle(.secondary)
-                }
-                .onAppear {
-                    guard !loadedBots else { return }
-                    loadedBots = true
-                    botChannels = model.slackBotChannels.sorted().joined(separator: ", ")
                 }
             }
             Label(model.slackStatus, systemImage: model.slackBusy ? "arrow.triangle.2.circlepath"
@@ -288,12 +366,11 @@ struct JiraSettingsSection: View {
     @ObservedObject var model: QueueModel
     @State private var config = JiraConfig()
     @State private var token = ""
-    @State private var ignored = ""
     @State private var loaded = false
 
     private var failed: Bool { model.jiraStatus.contains("failed") }
     private var statusIcon: String {
-        model.jiraSyncing ? "arrow.triangle.2.circlepath" : failed ? "exclamationmark.triangle.fill"
+        model.jiraTesting ? "arrow.triangle.2.circlepath" : failed ? "exclamationmark.triangle.fill"
             : model.jiraStatus.hasPrefix("Connected") || model.jiraStatus.hasPrefix("Synced") ? "checkmark.circle.fill"
             : "info.circle"
     }
@@ -320,30 +397,34 @@ struct JiraSettingsSection: View {
             HStack {
                 Link("Create an API token", destination: URL(string: "https://id.atlassian.com/manage-profile/security/api-tokens")!)
                 Spacer()
-                if model.jiraSyncing { ProgressView().controlSize(.small) }
+                if model.jiraTesting { ProgressView().controlSize(.small) }
                 Button("Save & Test") {
-                    config.ignoredAccountIds = ignored.split(separator: ",").map(String.init)
+                    config.ignoredAccountIds = model.jiraConfig.ignoredAccountIds   // saved on its own
                     model.saveJira(config, newToken: token)
                     token = ""
                 }
                 .fixedSize()
             }
-            // Result of the last test/sync, shown in the section so it can't be missed.
-            Label(model.jiraStatus, systemImage: statusIcon)
-                .foregroundStyle(statusColor)
-            DisclosureGroup("Advanced") {
-                TextField("Ignore comments from", text: $ignored, prompt: Text("account IDs, comma separated"))
-                Text("Comments from these Atlassian accounts (bots posting as people) never count as a reply. Saved with Save & Test.")
+            AdvancedGroup {
+                EditableList(title: "Ignore comments from", prompt: "Type an Atlassian account ID and press Return",
+                             items: model.jiraConfig.ignoredAccountIds,
+                             onChange: { model.setJiraIgnored($0) })
+                Text("Comments from these Atlassian accounts (bots posting as people) never count as a reply. Changes save right away.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            // Result of the last test/sync, last in the section (same as Slack).
+            Label(model.jiraStatus, systemImage: statusIcon)
+                .foregroundStyle(statusColor)
         } header: {
             Text("Jira")
+        } footer: {
+            Text("Save & Test signs you in as yourself: your own API token, kept in this Mac's Keychain, reading only what you can already see in Jira. Nobody else can use it. Turning this off keeps your token saved. Syncs every 15 seconds.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear {
             guard !loaded else { return }
             loaded = true
             config = model.jiraConfig
-            ignored = config.ignoredAccountIds.joined(separator: ", ")
         }
     }
 }

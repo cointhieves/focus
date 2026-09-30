@@ -217,6 +217,8 @@ final class QueueModel: ObservableObject {
     /// One-line status for Settings: last sync result or the error.
     @Published private(set) var jiraStatus = "Not connected"
     @Published private(set) var jiraSyncing = false
+    /// Only while Save & Test checks the credentials (drives the spinner); routine syncs don't show one.
+    @Published private(set) var jiraTesting = false
 
     /// Token read from the Keychain at most once per launch. Each Keychain read can
     /// trigger a macOS permission prompt, so it is cached in memory.
@@ -259,6 +261,18 @@ final class QueueModel: ObservableObject {
         testJira()
     }
 
+    /// Saves the ignored-accounts list right away (no Save & Test needed).
+    func setJiraIgnored(_ ids: [String]) {
+        var c = jiraConfig
+        c.ignoredAccountIds = ids
+        do {
+            try store.saveJiraConfig(c)
+            jiraConfig = try store.loadJiraConfig()
+        } catch {
+            jiraStatus = "Save failed: \(error)"
+        }
+    }
+
     /// Turns the Jira integration on or off right away (no Save needed).
     func setJiraEnabled(_ on: Bool) {
         var c = jiraConfig
@@ -288,6 +302,7 @@ final class QueueModel: ObservableObject {
             return
         }
         jiraSyncing = true
+        jiraTesting = true
         jiraStatus = "Testing connection…"
         let client = JiraClient(config: jiraConfig, token: token)
         Task {
@@ -295,6 +310,7 @@ final class QueueModel: ObservableObject {
                 let me = try await client.myself()
                 let name = me.displayName ?? me.accountId
                 jiraSyncing = false
+                jiraTesting = false
                 if jiraConfig.enabled {
                     jiraStatus = "Connected as \(name). Syncing…"
                     syncJira()
@@ -303,6 +319,7 @@ final class QueueModel: ObservableObject {
                 }
             } catch {
                 jiraSyncing = false
+                jiraTesting = false
                 jiraStatus = "Connection failed: \(error)"
             }
         }
@@ -315,7 +332,7 @@ final class QueueModel: ObservableObject {
             jiraStatus = "Jira isn't set up in this build (JiraSite in Resources/Org.plist; see README)"
             return
         }
-        jiraStatus = "Syncing…"
+        // No "Syncing…" here: routine syncs just update the line when done (same as Slack).
         guard !jiraConfig.email.isEmpty, let token = jiraToken else {
             jiraStatus = "Add your email and API token"
             return
@@ -344,7 +361,7 @@ final class QueueModel: ObservableObject {
                 }
                 let t = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
                 let total = items.filter { $0.source == .jira && $0.externalId?.contains("DEMO-") != true }.count
-                jiraStatus = "Synced at \(t): \(total) ticket\(total == 1 ? "" : "s") need attention"
+                jiraStatus = "Synced at \(t): \(total) ticket\(total == 1 ? "" : "s") need\(total == 1 ? "s" : "") you"
                     + (mentionCount > 0 ? " (\(mentionCount) mention\(mentionCount == 1 ? "" : "s"))" : "")
                 log.notice("jira sync: \(states.count, privacy: .public) states, popped \(popped.joined(separator: ","), privacy: .public)")
             } catch {
@@ -542,8 +559,8 @@ final class QueueModel: ObservableObject {
     /// Channels where bot alerts that mention me or my groups count (names, normalized).
     @Published private(set) var slackBotChannels: Set<String> = []
 
-    func setSlackBotChannels(_ text: String) {
-        let names = Set(text.split(separator: ",").map { SlackSource.channelKey(String($0)) }.filter { !$0.isEmpty })
+    func setSlackBotChannels(_ list: [String]) {
+        let names = Set(list.map(SlackSource.channelKey).filter { !$0.isEmpty })
         slackBotChannels = names
         try? store.setPref("slack_bot_channels", names.sorted().joined(separator: ","))
         syncSlack()

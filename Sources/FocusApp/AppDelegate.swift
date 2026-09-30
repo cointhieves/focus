@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keyMonitor: Any?
     private var settingsWindow: NSWindow?
     private var settingsHost: NSHostingController<SettingsView>?
+    /// True while the settings content is taller than the room below the window's top (it scrolls).
+    private var settingsCapped = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -167,9 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        let makeView = { [weak self] (height: CGFloat?) in
-            SettingsView(model: self!.model, onResetPosition: { self?.resetPosition() }, height: height)
-        }
+        let makeView = { [weak self] (height: CGFloat?) in self!.settingsView(height: height) }
         if settingsWindow == nil {
             let host = NSHostingController(rootView: makeView(nil))
             host.sizingOptions = []   // sized explicitly below, so it can be capped to the screen
@@ -193,7 +193,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let chrome = window.frame.height - window.contentLayoutRect.height
         let cap = visible.height - chrome - 40
         let height = min(natural.height, cap)
-        host.rootView = makeView(natural.height > cap ? height : nil)
+        settingsCapped = natural.height > cap
+        host.rootView = makeView(settingsCapped ? height : nil)
         window.setContentSize(NSSize(width: natural.width, height: height))
         // Centered, unless that would sit under the always-on-top panel: then beside it,
         // on whichever side has room (left first, since the panel defaults to the right).
@@ -210,6 +211,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A menubar-only app is never frontmost on its own; bring it forward for the window.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    private func settingsView(height: CGFloat?) -> SettingsView {
+        SettingsView(model: model, onResetPosition: { [weak self] in self?.resetPosition() }, height: height,
+                     onHeight: { [weak self] h in self?.fitSettings(to: h) })
+    }
+
+    /// Keeps the settings window as tall as its content (e.g. when Advanced opens), with the
+    /// top edge fixed so whatever was just clicked stays under the cursor. Stops at the
+    /// bottom of the screen; past that the content scrolls.
+    private func fitSettings(to natural: CGFloat) {
+        guard natural > 100, let window = settingsWindow, let host = settingsHost, window.isVisible,
+              let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+        let chrome = window.frame.height - window.contentLayoutRect.height
+        let cap = window.frame.maxY - visible.minY - chrome - 20
+        let height = min(natural, cap)
+        let capped = natural > cap
+        if capped != settingsCapped {
+            settingsCapped = capped
+            host.rootView = settingsView(height: capped ? height : nil)
+        }
+        var frame = window.frame
+        let newHeight = height + chrome
+        guard abs(frame.height - newHeight) > 0.5 else { return }
+        frame.origin.y += frame.height - newHeight
+        frame.size.height = newHeight
+        window.setFrame(frame, display: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
