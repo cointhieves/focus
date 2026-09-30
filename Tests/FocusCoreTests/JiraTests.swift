@@ -170,3 +170,29 @@ private func ticket(_ key: String, waiting: Bool = false) -> JiraTicketState {
     try s.applyJira([], site: nil, now: now)
     #expect(!(try s.queue().contains { $0.externalId == "A" }))
 }
+
+// Wed 12:00 UTC "now". An after-hours comment yesterday (Tue 17:09) comes back at today's
+// workday start, whatever that is, instead of after 8 more business hours.
+@Test func commentFromYesterdayEveningShowsAtTodaysWorkdayStart() {
+    let tue1709 = ISO8601DateFormatter().date(from: "2026-09-29T17:09:00Z")!
+    let mine = [comment("1", me, at: tue1709)]
+    func at(_ iso: String, start: Double) -> JiraTicketState? {
+        JiraClassifier.classify(issue: issue, comments: mine, me: me, ignored: [], greenUntilHours: 8,
+                                workStartHour: start, workEndHour: 17,
+                                now: ISO8601DateFormatter().date(from: iso)!, calendar: cal)
+    }
+    #expect(at("2026-09-30T08:59:00Z", start: 9) == nil)
+    #expect(at("2026-09-30T09:00:00Z", start: 9) != nil)
+    #expect(at("2026-09-30T07:30:00Z", start: 7.5) != nil)   // custom workday start
+    #expect(at("2026-09-30T07:29:00Z", start: 7.5) == nil)
+}
+
+@Test func fridayCommentComesBackMonday() {
+    let fri = ISO8601DateFormatter().date(from: "2026-10-02T15:00:00Z")!
+    let mon = ISO8601DateFormatter().date(from: "2026-10-05T09:00:00Z")!
+    #expect(BusinessClock.nextWorkdayStart(after: fri, startHour: 9, calendar: cal) == mon)
+}
+
+@Test func commentEarlierTodayStaysHidden() {
+    #expect(classify([comment("1", me, at: hoursAgo(2))]) == nil)
+}

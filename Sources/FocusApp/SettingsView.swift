@@ -231,6 +231,25 @@ private struct SettingsHeight: ViewModifier {
     }
 }
 
+/// The status line at the bottom of Jira and Slack. One rule for both:
+/// working (arrows, grey) while connecting/testing; red when you need to do something;
+/// green when connected or synced; otherwise grey (Off, Not connected).
+struct IntegrationStatus: View {
+    let text: String
+    let working: Bool
+
+    private static let needsAction = ["failed", "expired", "not completed", "Could not", "rejected",
+                                      "denied", "No API token", "Add your email", "isn't set up"]
+    private var bad: Bool { Self.needsAction.contains { text.localizedCaseInsensitiveContains($0) } }
+    private var ok: Bool { !bad && (text.hasPrefix("Connected") || text.hasPrefix("Synced")) }
+
+    var body: some View {
+        Label(text, systemImage: working ? "arrow.triangle.2.circlepath"
+              : bad ? "exclamationmark.triangle.fill" : ok ? "checkmark.circle.fill" : "info.circle")
+            .foregroundStyle(working ? Color.secondary : bad ? Color.red : ok ? Color.green : Color.secondary)
+    }
+}
+
 /// "Advanced" disclosure where the whole row (word included) toggles it, not only the
 /// small chevron, which is all a plain DisclosureGroup responds to on macOS.
 struct AdvancedGroup<Content: View>: View {
@@ -307,9 +326,6 @@ struct EditableList: View {
 struct SlackSettingsSection: View {
     @ObservedObject var model: QueueModel
 
-    private var ok: Bool { model.slackStatus.hasPrefix("Connected") || model.slackStatus.hasPrefix("Synced") }
-    private var bad: Bool { ["failed", "expired", "not completed", "Could not"].contains { model.slackStatus.contains($0) } }
-
     var body: some View {
         Section {
             // Same shape as Jira: on/off first, then what's needed to connect, then status.
@@ -349,9 +365,7 @@ struct SlackSettingsSection: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Label(model.slackStatus, systemImage: model.slackBusy ? "arrow.triangle.2.circlepath"
-                  : ok ? "checkmark.circle.fill" : bad ? "exclamationmark.triangle.fill" : "info.circle")
-                .foregroundStyle(ok ? .green : bad ? .red : .secondary)
+            IntegrationStatus(text: model.slackStatus, working: model.slackBusy)
         } header: {
             Text("Slack")
         } footer: {
@@ -368,16 +382,6 @@ struct JiraSettingsSection: View {
     @State private var token = ""
     /// Reconnect shows the email/token fields again while already connected.
     @State private var editing = false
-
-    private var failed: Bool { model.jiraStatus.contains("failed") }
-    private var statusIcon: String {
-        model.jiraTesting ? "arrow.triangle.2.circlepath" : failed ? "exclamationmark.triangle.fill"
-            : model.jiraStatus.hasPrefix("Connected") || model.jiraStatus.hasPrefix("Synced") ? "checkmark.circle.fill"
-            : "info.circle"
-    }
-    private var statusColor: Color {
-        failed ? .red : model.jiraStatus.hasPrefix("Connected") || model.jiraStatus.hasPrefix("Synced") ? .green : .secondary
-    }
 
     private func connect() {
         model.saveJira(model.jiraConfig, newToken: token)
@@ -436,8 +440,7 @@ struct JiraSettingsSection: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Label(model.jiraStatus, systemImage: statusIcon)
-                .foregroundStyle(statusColor)
+            IntegrationStatus(text: model.jiraStatus, working: model.jiraTesting)
         } header: {
             Text("Jira")
         } footer: {

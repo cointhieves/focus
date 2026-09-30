@@ -80,8 +80,13 @@ public enum JiraClassifier {
         }
         let newestReply = replies.first { reply in mine.map { reply.created > $0.created } ?? true }
 
+        // My comment hides the ticket until the start of the next workday (the user's own
+        // workday start, not a fixed time), so anything I answered today is on tomorrow's
+        // list. A shorter "green until" can bring it back sooner the same day.
         let stale: Bool = {
             guard let mine else { return true }
+            if now >= BusinessClock.nextWorkdayStart(after: mine.created, startHour: workStartHour,
+                                                     calendar: calendar) { return true }
             return BusinessClock.hours(from: mine.created, to: now, startHour: workStartHour,
                                        endHour: workEndHour, calendar: calendar) >= greenUntilHours
         }()

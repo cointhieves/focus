@@ -16,6 +16,13 @@ tool drives the same queue, which is handy for scripts and AI agents.
 Most recent first. To update, pull the latest code and run `make install` again.
 
 **September 30, 2026**
+- **Tickets you answered come back the next workday.** After you comment on a sprint ticket,
+  it now returns at the start of your next workday (the start time in Settings; Friday
+  comments return Monday), or after your "green until" time, whichever comes first. Before,
+  a comment made after hours could keep a ticket hidden until the end of the next day.
+- **Status colors mean the same thing in Jira and Slack.** Red means you need to do something
+  (a failed sync, a missing token, an expired sign-in), green means connected, grey means off
+  or not connected.
 - **Jira settings work like Slack's.** Connect with **Connect Jira**; once connected, the
   email and token fields tuck away and you get **Reconnect** and **Disconnect**. Disconnect
   removes your token from the Keychain and clears your Jira items (your email is kept).

@@ -52,6 +52,17 @@ public enum BusinessClock {
         return total / 3600
     }
 
+    /// When the next workday starts after `date`: `startHour` on the first weekday after
+    /// `date`'s calendar day. A Friday comment gives Monday's start.
+    public static func nextWorkdayStart(after date: Date, startHour: Double = 9,
+                                        calendar: Calendar = .current) -> Date {
+        var day = calendar.startOfDay(for: date)
+        repeat {
+            day = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
+        } while calendar.isDateInWeekend(day)
+        return day.addingTimeInterval(startHour * 3600)
+    }
+
     /// The date `hours` business hours after `start` (for the boomerang).
     public static func date(businessHours hours: Double, after start: Date, startHour: Double = 9, endHour: Double = 17,
                             calendar: Calendar = .current) -> Date {
