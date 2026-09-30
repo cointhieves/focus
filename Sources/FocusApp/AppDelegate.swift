@@ -242,6 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         model?.commitPendingDone()
+        panel.collapseNow()   // don't save a "+N more" height as the normal size
     }
 
     @objc private func quit() { NSApplication.shared.terminate(nil) }

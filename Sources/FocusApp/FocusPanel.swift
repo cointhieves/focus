@@ -6,6 +6,9 @@ final class FocusPanel: NSPanel {
     private static let autosaveName = "FocusPanel"
     /// Height the user had before "+N more" grew the panel; restored on fade.
     private var heightBeforeExpand: CGFloat?
+    /// Height "+N more" grew the panel to. If the panel is a different height by the time
+    /// we'd collapse, the user resized it by hand, and that size wins.
+    private var expandedHeight: CGFloat?
     private var observers: [NSObjectProtocol] = []
 
     init<Content: View>(content: Content) {
@@ -34,11 +37,27 @@ final class FocusPanel: NSPanel {
         if !setFrameUsingName(Self.autosaveName) { placeTopRight() }
         setFrameAutosaveName(Self.autosaveName)
 
-        // A manual resize becomes the new baseline height for "+N more".
-        observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didEndLiveResizeNotification,
-                                                                object: self, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.heightBeforeExpand = nil }
-        })
+        // No live-resize observer: animated setFrame also posts didEndLiveResize, which
+        // used to wipe the "+N more" state right after growing. A manual resize is detected
+        // instead by the height no longer matching expandedHeight (takeCollapseHeight).
+    }
+
+    /// Hiding (⌃⌥F, middle-click, the menu, or hide-while-replying) also undoes a
+    /// "+N more" expansion, so the panel comes back at its regular size.
+    override func orderOut(_ sender: Any?) {
+        collapseNow()
+        super.orderOut(sender)
+    }
+
+    /// Undo a "+N more" expansion immediately, without animating. Also called on quit:
+    /// the frame is autosaved, so quitting while expanded would otherwise make the
+    /// expanded height the new normal size at the next launch.
+    func collapseNow() {
+        guard let h = takeCollapseHeight() else { return }
+        var f = frame
+        f.origin.y = f.maxY - h
+        f.size.height = h
+        setFrame(f, display: false, animate: false)
     }
 
     // Needed so the inline "add task" field can take keyboard input.
@@ -49,13 +68,22 @@ final class FocusPanel: NSPanel {
         guard delta > 0, let visible = (screen ?? NSScreen.main)?.visibleFrame else { return }
         if heightBeforeExpand == nil { heightBeforeExpand = frame.height }
         let maxHeight = frame.maxY - visible.minY
-        setHeight(min(frame.height + ceil(delta), maxHeight))
+        let target = min(frame.height + ceil(delta), maxHeight)
+        expandedHeight = target
+        setHeight(target)
+    }
+
+    /// The height to go back to, or nil if there's nothing to undo (never expanded, or
+    /// resized by hand since). Clears the expansion either way.
+    private func takeCollapseHeight() -> CGFloat? {
+        defer { heightBeforeExpand = nil; expandedHeight = nil }
+        guard let h = heightBeforeExpand, let e = expandedHeight, abs(frame.height - e) < 2 else { return nil }
+        return h
     }
 
     /// Undo a "+N more" expansion, if one happened since the last manual resize.
     func restoreHeight() {
-        guard let h = heightBeforeExpand else { return }
-        heightBeforeExpand = nil
+        guard let h = takeCollapseHeight() else { return }
         setHeight(h)
     }
 

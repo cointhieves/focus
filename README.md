@@ -16,6 +16,9 @@ tool drives the same queue, which is handy for scripts and AI agents.
 Most recent first. To update, pull the latest code and run `make install` again.
 
 **September 30, 2026**
+- **Show less.** After "+N more" expands the list, a **Show less** button puts the panel back
+  to your size. Hiding or quitting Focus while expanded also returns it to your size, instead
+  of leaving it stuck tall.
 - **Tickets you answered come back the next workday.** After you comment on a sprint ticket,
   it now returns at the start of your next workday (the start time in Settings; Friday
   comments return Monday), or after your "green until" time, whichever comes first. Before,

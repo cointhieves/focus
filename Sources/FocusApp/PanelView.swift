@@ -20,6 +20,10 @@ struct PanelView: View {
     @State private var rowFrames: [Int64: CGRect] = [:]
     @State private var viewportHeight: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
+    /// True after "+N more" until the panel collapses (Show less, fade, or hide).
+    @State private var expanded = false
+    /// Set by Show less (outside the ScrollViewReader) to scroll back to the top.
+    @State private var scrollToTop = false
 
     var body: some View {
         // Text and background fade; the color strips on each row do not.
@@ -85,11 +89,17 @@ struct PanelView: View {
                 .onPreferenceChange(ViewportHeightKey.self) { viewportHeight = $0 }
                 // When the panel fades, return to the regular view: undo any
                 // "+N more" expansion and scroll back to the top.
+                .onChange(of: scrollToTop) { go in
+                    guard go else { return }
+                    scrollToTop = false
+                    proxy.scrollTo("top", anchor: .top)
+                }
                 .onReceive(fade.$awake) { awake in
                     guard !awake else { return }
                     // @Published emits BEFORE the value changes. Mutating state here
                     // synchronously swallows the fade redraw, so defer the reset.
                     DispatchQueue.main.async {
+                        expanded = false
                         onCollapse()
                         proxy.scrollTo("top", anchor: .top)
                     }
@@ -125,8 +135,18 @@ struct PanelView: View {
                     Spacer()
                 }
                 if hidden > 0 {
-                    Button("+\(hidden) more") { onExpand(contentHeight - viewportHeight) }
-                        .opacity(contentOpacity)
+                    Button("+\(hidden) more") {
+                        onExpand(contentHeight - viewportHeight)
+                        expanded = true
+                    }
+                    .opacity(contentOpacity)
+                } else if expanded {
+                    Button("Show less") {
+                        expanded = false
+                        onCollapse()
+                        scrollToTop = true
+                    }
+                    .opacity(contentOpacity)
                 }
             }
             .buttonStyle(.borderless)
