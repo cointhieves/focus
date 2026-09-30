@@ -355,7 +355,7 @@ public enum JiraMentions {
 }
 
 extension JiraClient {
-    /// "SECPLATOPS" for "SECPLATOPS-2891".
+    /// "ABC" for "ABC-123".
     public static func project(of key: String) -> String {
         key.split(separator: "-").dropLast().joined(separator: "-")
     }

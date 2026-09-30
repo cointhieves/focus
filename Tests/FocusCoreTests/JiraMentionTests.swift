@@ -65,7 +65,7 @@ private func m(_ key: String, _ marker: String) -> JiraMentionState {
     #expect(try s.mentionKeys() == ["K-3"])
 }
 
-// "Tickets I reported": the EPSPT-36281 shape. On my ticket, a comment after mine counts
+// "Tickets I reported": a support-queue ticket. On my ticket, a comment after mine counts
 // unless it tags someone else; a direct @mention of me still counts (and wins the reason).
 private let t0 = Date(timeIntervalSince1970: 1_000_000)
 private func c(_ id: String, _ who: String, _ min: Double, me: Bool = false, others: Bool = false,
@@ -122,6 +122,6 @@ private func c(_ id: String, _ who: String, _ min: Double, me: Bool = false, oth
 }
 
 @Test func projectOfKey() {
-    #expect(JiraClient.project(of: "SECPLATOPS-2891") == "SECPLATOPS")
-    #expect(JiraClient.project(of: "EPSPT-36281") == "EPSPT")
+    #expect(JiraClient.project(of: "ABC-123") == "ABC")
+    #expect(JiraClient.project(of: "OPS2-7") == "OPS2")
 }
