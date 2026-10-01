@@ -15,6 +15,10 @@ tool drives the same queue, which is handy for scripts and AI agents.
 
 Most recent first. To update, pull the latest code and run `make install` again.
 
+**October 1, 2026**
+- **Amber means amber.** An item past its "green until" time now turns a clear amber
+  straight away and deepens to red, instead of staying green-looking until halfway there.
+
 **September 30, 2026**
 - **Team tags are handled once your team answers.** When someone tags a Slack group you're
   in (not you personally), Focus shows that one message and clears it once a member of the

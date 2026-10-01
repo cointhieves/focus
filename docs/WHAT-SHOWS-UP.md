@@ -80,7 +80,7 @@ you mark them **Done**.
 
 - **Business hours** come from Settings (default 9 AM to 5 PM, Monday to Friday). Ages,
   colours and "next workday" all count only business hours.
-- **Colours:** Jira is green for 8 business hours, then amber, red at 16. Slack is green
+- **Colours:** Jira is green for 8 business hours, then turns amber straight away and deepens to red at 16. Slack is green
   for 1 business hour, then amber, red at 2. All four are settings.
 - **Sync:** Jira every 15 seconds, Slack every 30 seconds.
 - **Order:** new or popped items first (deadlines, then Slack, then Jira), each

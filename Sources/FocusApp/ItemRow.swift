@@ -99,12 +99,15 @@ struct ItemRow: View {
         return bandColor(band)
     }
 
+    /// Amber (hue 0.11) at the start of the ramp, red (0) at the end.
+    static func rampHue(_ f: Double) -> Double { 0.11 * (1 - min(max(f, 0), 1)) }
+
     static func bandColor(_ band: AgeScale.Band) -> Color {
         switch band {
         case .none: Color(hue: 0.6, saturation: 0.7, brightness: 0.9)   // tasks: blue
         case .green: Color(hue: 0.33, saturation: 0.75, brightness: 0.8)
-        // Green -> yellow -> red as the item ages.
-        case .ramp(let f): Color(hue: 0.33 * (1 - f), saturation: 0.8, brightness: 0.9)
+        // Past "green until": starts at a clear amber (never green) and deepens to red.
+        case .ramp(let f): Color(hue: rampHue(f), saturation: 0.85, brightness: 0.9)
         case .red: Color(hue: 0.0, saturation: 0.85, brightness: 0.9)
         // Timed items: blue -> purple -> red over the last third.
         case .due(let f): Color(hue: 0.6 + 0.4 * f, saturation: 0.75, brightness: 0.9)
