@@ -98,6 +98,8 @@ final class QueueModel: ObservableObject {
     /// shake, no farewells, no panel reappearing for what was already there.
     private var slackQuiet = false
     private var jiraQuiet = false
+    /// Consecutive syncs where Jira said I have no sprint tickets while sprint rows are showing.
+    private var emptySprintSyncs = 0
     /// Set just before a quiet write, so that reload doesn't light anything up.
     private var quietReload = false
     /// Items that appeared or moved after this time get the shake.
@@ -431,6 +433,17 @@ final class QueueModel: ObservableObject {
             do {
                 let result = try await client.fetchStates(greenUntilHours: greenUntil, workStartHour: workStart, workEndHour: workEnd)
                 let states = result.states
+                // A single empty answer from Jira (search hiccup) must not mark every ticket
+                // REMOVED. Act on "no sprint tickets" only when the next sync agrees.
+                let showing = items.contains { $0.source == .jira && Store.mentionKey($0.externalId ?? "") == nil
+                                               && $0.externalId?.contains("DEMO-") != true && !$0.removed }
+                if result.inScopeKeys.isEmpty && showing && emptySprintSyncs == 0 {
+                    emptySprintSyncs = 1
+                    jiraSyncing = false
+                    log.notice("jira sync: empty sprint result while tickets are showing; waiting for the next sync to confirm")
+                    return
+                }
+                emptySprintSyncs = 0
                 let popped = applySync(result, site: site)
                 var mentionCount = 0, reportedCount = 0
                 if !jiraMentionsOn && !jiraReportedOn { jiraQuiet = false }

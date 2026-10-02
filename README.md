@@ -16,6 +16,8 @@ tool drives the same queue, which is handy for scripts and AI agents.
 Most recent first. To update, pull the latest code and run `make install` again.
 
 **October 1, 2026**
+- **A Jira hiccup can't wipe the panel.** If Jira briefly reports no sprint tickets at all,
+  Focus waits one more sync to confirm before marking anything REMOVED.
 - **Amber means amber.** An item past its "green until" time now turns a clear amber
   straight away and deepens to red, instead of staying green-looking until halfway there.
 

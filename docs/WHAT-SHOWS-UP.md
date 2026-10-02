@@ -32,6 +32,8 @@ and neither does anyone on **Settings → Jira → Advanced → Ignore comments 
 | Your sprint ticket moves to **Done** | Plays **CLOSED**, then leaves | — | — |
 | Your sprint ticket leaves the sprint, goes back to To Do, or is reassigned | Stays, marked **REMOVED** | — | You dismiss it |
 
+If Jira suddenly reports **no** sprint tickets at all while some are showing, Focus waits for the next sync (15 seconds) to confirm before marking anything REMOVED, so a momentary Jira hiccup can't empty the panel.
+
 **Your team's projects** are the projects your own sprint tickets come from. Focus learns
 them automatically and forgets one that hasn't appeared in your sprint for 30 days.
 Nothing is configured and no project names are built in, so this works the same for
