@@ -74,9 +74,17 @@ your last message and the newest message you reacted to.
 
 ## Tasks
 
-Tasks are items you add yourself. "by 5pm", "by Friday 3pm" or "in 30 minutes" in the
-text sets a deadline; a task that hits its deadline jumps to the top. Tasks stay until
-you mark them **Done**.
+Tasks are items you add yourself. A deadline is set when the text contains:
+
+- **"by …"** anywhere: "by 5pm", "by Friday 3pm", "by tomorrow".
+- **"in …"**: "in 30 minutes", "in 2 hours".
+- **A day or time at the end**, after "on" or "at", or starting with today, tomorrow or a
+  weekday: "call Sam tomorrow at 10am", "check in on Wednesday", "send report Friday".
+  A date mid-sentence, or after "from", "since", "last", "about" or "of" ("notes from
+  Monday"), is left as plain text.
+
+A day with no time means the **end of your workday** (Settings). A task that hits its
+deadline jumps to the top. Tasks stay until you mark them **Done**.
 
 ## Timing
 

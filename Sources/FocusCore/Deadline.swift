@@ -22,8 +22,12 @@ public enum Deadline {
     }
 
     /// Splits "take out the trash by 5pm" into ("take out the trash", 17:00 today).
-    /// Returns the original text and nil when no deadline is found.
-    public static func parse(_ text: String, now: Date = Date(), calendar: Calendar = .current) -> (title: String, due: Date?) {
+    /// Understands "in 30 minutes", "by <date>", and a date at the END of the text after
+    /// "on"/"at" or starting with today/tomorrow/a weekday ("call Sam tomorrow at 10am",
+    /// "check in on wednesday"). A date with no time means the end of the workday
+    /// (`endOfDayHour`). Returns the original text and nil when no deadline is found.
+    public static func parse(_ text: String, now: Date = Date(), endOfDayHour: Double = 17,
+                             calendar: Calendar = .current) -> (title: String, due: Date?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // "in 30 minutes" / "in 2 hours": the system date detector does not handle these.
@@ -38,28 +42,59 @@ public enum Deadline {
             return (clean(ns.replacingCharacters(in: m.range, with: "")), now.addingTimeInterval(seconds))
         }
 
-        // "by <date>": only dates after the word "by" count, so text like
-        // "notes from Monday" does not accidentally become a deadline.
-        guard let byRange = trimmed.range(of: #"\bby\s+"#, options: [.regularExpression, .caseInsensitive, .backwards])
-        else { return (trimmed, nil) }
-        let head = String(trimmed[..<byRange.lowerBound])
-        var tail = String(trimmed[byRange.upperBound...])
-        // The detector does not understand "noon".
-        tail = tail.replacingOccurrences(of: "noon", with: "12pm", options: .caseInsensitive)
+        // "by <date>" anywhere: the date must directly follow "by".
+        if let byRange = trimmed.range(of: #"\bby\s+"#, options: [.regularExpression, .caseInsensitive, .backwards]),
+           let r = detect(String(trimmed[byRange.upperBound...]), mustReachEnd: false, now: now,
+                          endOfDayHour: endOfDayHour, calendar: calendar) {
+            return (clean(String(trimmed[..<byRange.lowerBound]) + " " + r.leftover), r.due)
+        }
 
+        // A date at the end of the text, introduced by "on"/"at", or starting with
+        // today/tomorrow/a weekday. Not after from/since/last/about/of, so "notes from
+        // Monday" stays plain text. The earliest start that reads as a date wins.
+        let trigger = try! NSRegularExpression(
+            pattern: #"\b(?:(on|at)\s+|(?=(today|tonight|tomorrow|mon|monday|tue|tues|tuesday|wed|weds|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\b))"#,
+            options: .caseInsensitive)
+        let blocked: Set<String> = ["from", "since", "last", "about", "of"]
+        for m in trigger.matches(in: trimmed, range: NSRange(location: 0, length: ns.length)) {
+            let before = ns.substring(to: m.range.location).split(whereSeparator: \.isWhitespace).last.map { $0.lowercased() }
+            if m.range(at: 2).location != NSNotFound, let w = before, blocked.contains(w) { continue }
+            let tail = ns.substring(from: m.range.location + m.range.length)
+            guard let r = detect(tail, mustReachEnd: true, now: now, endOfDayHour: endOfDayHour, calendar: calendar)
+            else { continue }
+            return (clean(ns.substring(to: m.range.location)), r.due)
+        }
+        return (trimmed, nil)
+    }
+
+    /// Reads a date at the very start of `tail`. With `mustReachEnd`, the date must also run
+    /// to the end (trailing punctuation allowed). A date with no time gets `endOfDayHour`.
+    private static func detect(_ raw: String, mustReachEnd: Bool, now: Date, endOfDayHour: Double,
+                               calendar: Calendar) -> (due: Date, leftover: String)? {
+        // The detector does not understand "noon".
+        let tail = raw.replacingOccurrences(of: "noon", with: "12pm", options: .caseInsensitive)
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue),
               let match = detector.firstMatch(in: tail, range: NSRange(tail.startIndex..., in: tail)),
-              match.range.location == 0,                 // the date must directly follow "by"
-              var due = match.date
-        else { return (trimmed, nil) }
-
-        // "by 11am" typed at 1pm means tomorrow at 11.
-        if due <= now, now.timeIntervalSince(due) < 24 * 3600,
-           let next = calendar.date(byAdding: .day, value: 1, to: due) {
-            due = next
+              match.range.location == 0, var due = match.date else { return nil }
+        let t = tail as NSString
+        let rest = t.substring(from: match.range.location + match.range.length)
+        if mustReachEnd, !rest.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).isEmpty {
+            return nil
         }
-        let leftover = (tail as NSString).replacingCharacters(in: match.range, with: "")
-        return (clean(head + " " + leftover), due)
+        let phrase = t.substring(with: match.range)
+        let hasTime = phrase.range(of: #"\d\s*(am|pm|a\.m\.|p\.m\.)|\d:\d|\bat\s+\d"#,
+                                   options: [.regularExpression, .caseInsensitive]) != nil
+        if hasTime {
+            // "by 11am" typed at 1pm means tomorrow at 11.
+            if due <= now, now.timeIntervalSince(due) < 24 * 3600,
+               let next = calendar.date(byAdding: .day, value: 1, to: due) { due = next }
+        } else {
+            due = calendar.startOfDay(for: due).addingTimeInterval(endOfDayHour * 3600)
+            // "on monday" typed on a Monday after close: next week.
+            let isWeekday = phrase.range(of: #"^(mon|tue|wed|thu|fri|sat|sun)"#, options: [.regularExpression, .caseInsensitive]) != nil
+            if due <= now, isWeekday, let next = calendar.date(byAdding: .day, value: 7, to: due) { due = next }
+        }
+        return (due, rest)
     }
 
     /// Short countdown label: "in 42m", "in 3h 5m", "overdue 10m".

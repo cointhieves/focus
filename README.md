@@ -15,6 +15,11 @@ tool drives the same queue, which is handy for scripts and AI agents.
 
 Most recent first. To update, pull the latest code and run `make install` again.
 
+**October 5, 2026**
+- **Deadlines without "by".** A task ending in a day or time now gets a timer:
+  "call Sam tomorrow at 10am", "check in on Wednesday", "send report Friday". A day with no
+  time means the end of your workday (from Settings). "by 5pm" and "in 30 minutes" still work.
+
 **October 1, 2026**
 - **A Jira hiccup can't wipe the panel.** If Jira briefly reports no sprint tickets at all,
   Focus waits one more sync to confirm before marking anything REMOVED.
@@ -143,7 +148,7 @@ app is built locally, it asks again after each rebuild.
 - **Hover** over an item for **Skip** (send it to the back of the line) and **Dismiss**
   (hide it until someone posts something new). Tasks get **Done** instead of Dismiss.
 - **Add a task** with **+ Add** at the bottom, or click the panel and press Return.
-  Writing "by 5pm" or "in 30 min" in the text sets a deadline.
+  Writing "by 5pm", "in 30 min", "tomorrow at 10am" or "on Wednesday" sets a deadline.
 - Slack items clear when you reply or react with an emoji. Jira tickets clear when you
   comment, and come back at the start of your next workday if nothing else has happened.
 - **Why did something show up, or not?** [docs/WHAT-SHOWS-UP.md](docs/WHAT-SHOWS-UP.md)

@@ -100,3 +100,28 @@ private func today(_ h: Int, _ m: Int = 0) -> Date {
     #expect(item.title == "take out the trash")
     #expect(item.dueAt == today(9, 45))
 }
+
+@Test func trailingDayAndTimeWithoutBy() {
+    let now = today(10, 0)
+    let r = Deadline.parse("check in with Ann on the edge rollout tomorrow at 10am", now: now, calendar: cal)
+    #expect(r.title == "check in with Ann on the edge rollout")
+    #expect(r.due == cal.date(byAdding: .day, value: 1, to: today(10, 0)))
+}
+
+@Test func trailingDayWithoutTimeIsEndOfWorkday() {
+    let now = today(10, 0)
+    let r = Deadline.parse("check in with Bob about n8n on wednesday", now: now, endOfDayHour: 17, calendar: cal)
+    #expect(r.title == "check in with Bob about n8n")
+    let due = try! #require(r.due)
+    #expect(cal.component(.weekday, from: due) == 4)           // Wednesday
+    #expect(cal.component(.hour, from: due) == 17 && cal.component(.minute, from: due) == 0)
+    #expect(due > now)
+    // A custom end of day, and "by <day>" uses the same rule.
+    let byDay = Deadline.parse("send report by friday", now: now, endOfDayHour: 16.5, calendar: cal).due!
+    #expect(cal.component(.hour, from: byDay) == 16 && cal.component(.minute, from: byDay) == 30)
+}
+
+@Test func dateInMiddleOrAfterFromIsNotADeadline() {
+    #expect(Deadline.parse("notes on Monday's outage review", now: today(9), calendar: cal).due == nil)
+    #expect(Deadline.parse("follow up since tuesday", now: today(9), calendar: cal).due == nil)
+}

@@ -171,7 +171,7 @@ public final class Store {
     @discardableResult
     public func addIdea(_ text: String, due explicitDue: Date? = nil, now: Date = Date()) throws -> Item {
         let parsed: (title: String, due: Date?) =
-            explicitDue == nil ? Deadline.parse(text, now: now) : (text, nil)
+            explicitDue == nil ? Deadline.parse(text, now: now, endOfDayHour: (try? loadSettings())?.workEndHour ?? 17) : (text, nil)
         let title = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { throw StoreError(description: "task text is empty") }
         let due = explicitDue ?? parsed.due
