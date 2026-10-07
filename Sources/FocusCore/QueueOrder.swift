@@ -32,6 +32,27 @@ public enum QueueOrder {
         }
     }
 
+    /// Puts manually placed items back where they were dropped: each (in drop order) goes
+    /// just before its anchor item; anchor 0 means the end. If the anchor isn't in the
+    /// list (gone, hidden), the item keeps its normal position.
+    public static func applyPlacements(_ sorted: [Item], placements: [Int64: (before: Int64, seq: Int64)]) -> [Item] {
+        guard !placements.isEmpty else { return sorted }
+        let ids = Set(sorted.map(\.id))
+        let movable = placements.filter { ids.contains($0.key) && ($0.value.before == 0 || ids.contains($0.value.before)) }
+        var out = sorted.filter { movable[$0.id] == nil }
+        let byId = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
+        for (id, p) in movable.sorted(by: { $0.value.seq < $1.value.seq }) {
+            guard let item = byId[id] else { continue }
+            if p.before == 0 { out.append(item); continue }
+            if let i = out.firstIndex(where: { $0.id == p.before }) { out.insert(item, at: i) }
+            else if let normal = sorted.firstIndex(where: { $0.id == id }) {
+                // The anchor is itself placed later in the order: fall back to normal position.
+                out.insert(item, at: min(normal, out.count))
+            }
+        }
+        return out
+    }
+
     static func tier(_ item: Item) -> Int {
         if item.snoozedUntil != nil { return 3 }
         if item.backSeq != nil { return 2 }

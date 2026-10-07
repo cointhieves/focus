@@ -204,6 +204,8 @@ final class QueueModel: ObservableObject {
     func requestAdd() { addRequests += 1 }
 
     func skip(_ id: Int64) { write { try store.skip(id) } }
+    /// Manual reorder: put `id` just before `before` (nil = at the end).
+    func place(_ id: Int64, before: Int64?) { write { try store.place(id, before: before) } }
 
     /// Boomerang: to the bottom for `snoozeHours` business hours; on a snoozed item, back now.
     func toggleBoomerang(_ id: Int64) {

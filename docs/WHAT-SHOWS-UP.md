@@ -96,6 +96,11 @@ deadline jumps to the top. Tasks stay until you mark them **Done**.
 - **Order:** new or popped items first (deadlines, then Slack, then Jira), each
   oldest-first; then everything else by how long it has waited; then skipped items;
   then boomeranged items.
+- **Drag to reorder:** a row you drag stays where you dropped it, with normal ordering
+  carrying on around it (new items slot in by the rules above). It keeps its spot even if
+  the rows around it move or leave. New activity on it (a reply, a fired deadline, removed
+  from your sprint) pops it to the top and clears its manual spot; Skip, Dismiss and
+  Boomerang clear it too. After that it follows the normal order.
 - Turning a source or checkbox **off hides** its items; it doesn't delete them. Turning it
   back on restores them without popping everything again.
 
@@ -104,6 +109,7 @@ deadline jumps to the top. Tasks stay until you mark them **Done**.
 | Action | What it does |
 |---|---|
 | **Click** | Opens it. The panel hides while you reply and comes back after 5 minutes (a setting) or when you switch apps. |
+| **Drag** | Puts it where you drop it, until something new happens on it. |
 | **Skip** | Sends it to the back of the line. |
 | **Dismiss** | Hides it until something new happens on it. |
 | **Boomerang** | Snoozes it for 2 business hours (a setting), or until something new happens. It returns to where it was. |

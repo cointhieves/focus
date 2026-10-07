@@ -35,7 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onExpand: { [weak self] delta in self?.panel?.grow(by: delta) },
             onCollapse: { [weak self] in self?.panel?.restoreHeight() },
             onSettings: { [weak self] in self?.openSettings() },
-            onOpen: { [weak self] url in self?.openItem(url) }
+            onOpen: { [weak self] url in self?.openItem(url) },
+            onRowsHover: { [weak self] over in self?.panel?.isMovableByWindowBackground = !over }
         )
         panel = FocusPanel(content: view)
 

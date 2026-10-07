@@ -12,6 +12,8 @@ struct PanelView: View {
     var onSettings: () -> Void = {}
     /// Opens an item's link (the app hides the panel while you reply).
     var onOpen: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// The pointer entered (true) or left the rows: the panel stops / resumes moving on drag.
+    var onRowsHover: (Bool) -> Void = { _ in }
 
     @State private var adding = false
     @State private var draft = ""
@@ -20,6 +22,12 @@ struct PanelView: View {
     @State private var rowFrames: [Int64: CGRect] = [:]
     @State private var viewportHeight: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
+    /// Drag-to-reorder: the row being dragged, and the row it would land above (-1 = end).
+    @State private var dragging: Int64?
+    @State private var dropTarget: Int64?
+    /// A drag just ended on a row; swallow the click that a mouse-up on a row also sends.
+    @State private var dragEndedAt = Date.distantPast
+    @State private var hoveringRows = false
     /// True after "+N more" until the panel collapses (Show less, fade, or hide).
     @State private var expanded = false
     /// Set by Show less (outside the ScrollViewReader) to scroll back to the top.
@@ -55,7 +63,10 @@ struct PanelView: View {
                                 onDismiss: { model.dismiss(item.id) },
                                 onDone: { model.markDone(item.id) },
                                 onBoomerang: { model.toggleBoomerang(item.id) },
-                                onOpen: onOpen,
+                                onOpen: { url in
+                                    guard Date().timeIntervalSince(dragEndedAt) > 0.4 else { return }
+                                    onOpen(url)
+                                },
                                 onExpanded: {
                                     // After the expand animation, scroll just enough to show the
                                     // whole row (anchor nil = minimal scroll).
@@ -65,6 +76,14 @@ struct PanelView: View {
                                 }
                             )
                             .id(item.id)
+                            // Drag a row anywhere; it lands just above the line shown.
+                            .opacity(dragging == item.id ? 0.4 : 1)
+                            .simultaneousGesture(reorderGesture(item.id))
+                            .overlay(alignment: .top) {
+                                if dragging != nil, dropTarget == item.id {
+                                    Rectangle().fill(Color.accentColor).frame(height: 2).offset(y: -1)
+                                }
+                            }
                             .background(GeometryReader { geo in
                                 Color.clear.preference(
                                     key: RowFramesKey.self,
@@ -72,6 +91,9 @@ struct PanelView: View {
                                 )
                             })
                         }
+                        // Shows where a row dragged past the last one will land.
+                        Rectangle().fill(dragging != nil && dropTarget == -1 ? Color.accentColor : .clear)
+                            .frame(height: 2)
                     }
                     .id("top")
                     .background(GeometryReader { geo in
@@ -79,6 +101,11 @@ struct PanelView: View {
                     })
                 }
                 .coordinateSpace(name: "scroll")
+                // Over the rows, a drag reorders instead of moving the panel.
+                .onHover { over in
+                    hoveringRows = over
+                    onRowsHover(over || dragging != nil)
+                }
                 // Scrolling still works with the wheel/trackpad; the bar is just never drawn.
                 .scrollIndicators(.never)
                 .background(GeometryReader { geo in
@@ -171,6 +198,25 @@ struct PanelView: View {
         return model.items.count - visible
     }
 
+    /// Drag a row to reorder. The target is the first other row whose middle is below the
+    /// pointer; past the last row it goes to the end.
+    private func reorderGesture(_ id: Int64) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .named("scroll"))
+            .onChanged { g in
+                if dragging == nil { dragging = id; onRowsHover(true) }
+                let y = g.location.y
+                let below = model.displayItems.first { other in
+                    other.id != id && (rowFrames[other.id].map { $0.midY > y } ?? false)
+                }
+                dropTarget = below?.id ?? -1
+            }
+            .onEnded { _ in
+                defer { dragging = nil; dropTarget = nil; dragEndedAt = Date(); onRowsHover(hoveringRows) }
+                guard dragging == id, let target = dropTarget else { return }
+                model.place(id, before: target == -1 ? nil : target)
+            }
+    }
+
     private func closeAdd(save: Bool) {
         if save { model.addIdea(draft) }
         draft = ""
@@ -229,3 +275,4 @@ struct Shake: GeometryEffect {
         ProjectionTransform(CGAffineTransform(translationX: amount * sin(animatableData * .pi * 6), y: 0))
     }
 }
+

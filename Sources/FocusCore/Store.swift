@@ -114,6 +114,14 @@ public final class Store {
             PRAGMA user_version = 9;
             """)
         }
+        if version < 10 {
+            // Manual reorder: placed just before this item id (0 = at the end), in drop order.
+            try exec("""
+            ALTER TABLE items ADD COLUMN placed_before INTEGER;
+            ALTER TABLE items ADD COLUMN placed_seq INTEGER;
+            PRAGMA user_version = 10;
+            """)
+        }
     }
 
     // MARK: - Reads
@@ -127,7 +135,60 @@ public final class Store {
             FROM items
             WHERE dismissed_marker IS NULL OR dismissed_marker != change_marker
             """)
-        return QueueOrder.sort(rows.filter(try visibleFilter()))
+        let sorted = QueueOrder.sort(rows.filter(try visibleFilter()))
+        var pl = try placements()
+        let visible = Set(sorted.map(\.id))
+        // An anchor that's gone or hidden: re-anchor to the next row that was below it last
+        // time, so the placed row stays put instead of jumping.
+        for (id, p) in pl where p.before != 0 && visible.contains(id) && !visible.contains(p.before) {
+            guard let i = lastShown.firstIndex(of: p.before) else { continue }
+            let next = lastShown[(i + 1)...].first { visible.contains($0) && $0 != id } ?? 0
+            try run("UPDATE items SET placed_before = ? WHERE id = ?", next, id)
+            pl[id] = (next, p.seq)
+        }
+        let result = QueueOrder.applyPlacements(sorted, placements: pl)
+        lastShown = result.map(\.id)
+        return result
+    }
+
+    /// Display order from the last queue() call, used to keep placed rows put.
+    private var lastShown: [Int64] = []
+
+    /// Before `id` moves (pops, skips, leaves...), rows placed just above it are re-anchored
+    /// to whatever is below it now, so they stay where they were instead of following it.
+    private func detach(_ id: Int64) throws {
+        let order = try queue().map(\.id)
+        guard let i = order.firstIndex(of: id) else { return }
+        let next = i + 1 < order.count ? order[i + 1] : 0
+        try run("UPDATE items SET placed_before = ? WHERE placed_before = ? AND id != ?", next, id, next)
+    }
+
+    /// detach() for the rows with these Jira external ids.
+    private func detachJira(_ externalIds: [String]) throws {
+        for e in externalIds { if let id = try itemId(source: .jira, externalId: e) { try detach(id) } }
+    }
+
+    /// Manual placements: item id -> (placed before id, 0 = end; drop order).
+    private func placements() throws -> [Int64: (before: Int64, seq: Int64)] {
+        let stmt = try prepare("SELECT id, placed_before, placed_seq FROM items WHERE placed_seq IS NOT NULL", [])
+        defer { sqlite3_finalize(stmt) }
+        var out: [Int64: (before: Int64, seq: Int64)] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            out[sqlite3_column_int64(stmt, 0)] = (sqlite3_column_int64(stmt, 1), sqlite3_column_int64(stmt, 2))
+        }
+        return out
+    }
+
+    /// Manually places an item just before `before` (nil = at the end of the list). Normal
+    /// rules still apply around it; new activity on it clears the placement.
+    public func place(_ id: Int64, before: Int64?) throws {
+        try requireExists(id)
+        guard before != id else { return }
+        try detach(id)   // rows placed just above this one keep their spot
+        try run("""
+            UPDATE items SET placed_before = ?, placed_seq = (SELECT COALESCE(MAX(placed_seq), 0) + 1 FROM items)
+            WHERE id = ?
+            """, before ?? 0, id)
     }
 
     /// Items of a source (or Slack type) that's switched off are kept but hidden, so turning
@@ -193,8 +254,10 @@ public final class Store {
             guard let due = item.dueAt else { continue }
             let level = Deadline.level(created: item.createdAt, due: due, now: now)
             guard level > item.warnedLevel else { continue }
+            try detach(item.id)
             try run("""
                 UPDATE items SET warned_level = ?, moved_at = ?, back_seq = NULL, snoozed_until = NULL,
+                                 placed_before = NULL, placed_seq = NULL,
                                  pop_seq = (SELECT COALESCE(MAX(pop_seq), 0) + 1 FROM items)
                 WHERE id = ?
                 """, level, now.timeIntervalSince1970, item.id)
@@ -229,11 +292,16 @@ public final class Store {
     public func popToFront(_ id: Int64, now: Date = Date()) throws -> Bool {
         let current = try queue()
         guard let target = current.first(where: { $0.id == id }) else { throw notFound(id) }
-        if current.first?.id == id && target.snoozedUntil == nil { return false }
+        if current.first?.id == id && target.snoozedUntil == nil {
+            try run("UPDATE items SET placed_before = NULL, placed_seq = NULL WHERE id = ?", id)
+            return false
+        }
+        try detach(id)
         // Also ends a boomerang: new activity brings a snoozed item back early.
         try run("""
             UPDATE items SET pop_seq = (SELECT COALESCE(MAX(pop_seq), 0) + 1 FROM items),
-                             back_seq = NULL, snoozed_until = NULL, moved_at = ?
+                             back_seq = NULL, snoozed_until = NULL, moved_at = ?,
+                             placed_before = NULL, placed_seq = NULL
             WHERE id = ?
             """, now.timeIntervalSince1970, id)
         return true
@@ -242,9 +310,10 @@ public final class Store {
     /// Sends an item to the back of the line.
     public func skip(_ id: Int64) throws {
         try requireExists(id)
+        try detach(id)
         try run("""
             UPDATE items SET back_seq = (SELECT COALESCE(MAX(back_seq), 0) + 1 FROM items),
-                             pop_seq = NULL, snoozed_until = NULL
+                             pop_seq = NULL, snoozed_until = NULL, placed_before = NULL, placed_seq = NULL
             WHERE id = ?
             """, id)
     }
@@ -255,13 +324,16 @@ public final class Store {
     /// is kept, so it returns to where it was: Slack stays above Jira.
     public func snooze(_ id: Int64, until: Date) throws {
         try requireExists(id)
-        try run("UPDATE items SET snoozed_until = ? WHERE id = ?", until.timeIntervalSince1970, id)
+        try detach(id)
+        try run("UPDATE items SET snoozed_until = ?, placed_before = NULL, placed_seq = NULL WHERE id = ?",
+                until.timeIntervalSince1970, id)
     }
 
     /// Brings a snoozed item back now, to the place it had before, marked moved so it
     /// shakes and lights up.
     public func unsnooze(_ id: Int64, now: Date = Date()) throws {
         try requireExists(id)
+        try detach(id)
         try run("UPDATE items SET snoozed_until = NULL, moved_at = ? WHERE id = ?", now.timeIntervalSince1970, id)
     }
 
@@ -280,11 +352,12 @@ public final class Store {
     /// Hides an item until its source changes it. Tasks never change, so they stay hidden.
     /// A removed (out of scope) ticket is cleared: deleted outright.
     public func dismiss(_ id: Int64) throws {
+        try detach(id)
         if try item(id).removed {
             try run("DELETE FROM items WHERE id = ?", id)
             return
         }
-        try run("UPDATE items SET dismissed_marker = change_marker WHERE id = ?", id)
+        try run("UPDATE items SET dismissed_marker = change_marker, placed_before = NULL, placed_seq = NULL WHERE id = ?", id)
     }
 
     /// Permanently deletes a task (marking it done). Refuses Jira/Slack items, which a
@@ -294,6 +367,7 @@ public final class Store {
         guard existing.source == .idea else {
             throw StoreError(description: "item \(id) is a \(existing.source.rawValue) item; use dismiss instead")
         }
+        try detach(id)
         try run("DELETE FROM items WHERE id = ?", id)
     }
 
@@ -410,10 +484,12 @@ public final class Store {
         // Mention rows ("mention:KEY") are managed by applyJiraMentions; a ticket that is
         // now a sprint item drops its mention row so it isn't shown twice.
         for (id, key) in try externalIds(source: .jira) where Self.mentionKey(key).map(keep.contains) == true {
+            try detach(id)
             try run("DELETE FROM items WHERE id = ?", id)
         }
         for (id, key) in try externalIds(source: .jira) where Self.mentionKey(key) == nil && !keep.contains(key) && (limitTo?.contains(key) ?? !key.hasPrefix("DEMO-")) {
             guard let inScopeKeys, !inScopeKeys.contains(key), !doneKeys.contains(key) else {
+                try detach(id)
                 try run("DELETE FROM items WHERE id = ?", id)
                 continue
             }
@@ -426,9 +502,11 @@ public final class Store {
     /// left alone; a dismissed one is deleted, since it was already hidden.
     /// Public so the Try it demo can use it.
     public func markRemoved(_ id: Int64, now: Date = Date()) throws {
+        try detach(id)
         try run("DELETE FROM items WHERE id = ? AND removed_at IS NULL AND dismissed_marker = change_marker", id)
         try run("""
             UPDATE items SET removed_at = ?, moved_at = ?, back_seq = NULL, snoozed_until = NULL,
+                             placed_before = NULL, placed_seq = NULL,
                              pop_seq = (SELECT COALESCE(MAX(pop_seq), 0) + 1 FROM items)
             WHERE id = ? AND removed_at IS NULL
             """, now.timeIntervalSince1970, now.timeIntervalSince1970, id)
@@ -447,6 +525,7 @@ public final class Store {
             let ext = (st.viaReport ? "reported:" : "mention:") + st.key
             // One row per ticket: if the reason changed (a mention arrived on my reported
             // ticket, or the reverse), the new row replaces the old one.
+            try detachJira([(st.viaReport ? "mention:" : "reported:") + st.key])
             try run("DELETE FROM items WHERE source = 'jira' AND external_id = ?",
                     (st.viaReport ? "mention:" : "reported:") + st.key)
             let existing = try itemId(source: .jira, externalId: ext)
@@ -466,6 +545,7 @@ public final class Store {
             }
         }
         for key in remove where limitTo?.contains(key) ?? !key.hasPrefix("DEMO-") {
+            try detachJira(["mention:\(key)", "reported:\(key)"])
             try run("DELETE FROM items WHERE source = 'jira' AND external_id IN (?, ?)", "mention:\(key)", "reported:\(key)")
         }
         return popped
@@ -524,6 +604,7 @@ public final class Store {
         for (id, key) in try externalIds(source: .slack) where limitTo?.contains(key) ?? !key.contains("DEMO-") {
             // Turned-off kinds are hidden by queue(), not deleted, so they keep their state.
             if answered.contains(key) {
+                try detach(id)
                 try run("DELETE FROM items WHERE id = ?", id)
             }
         }
