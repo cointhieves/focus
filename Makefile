@@ -7,7 +7,7 @@ BIN_DIR   ?= $(HOME)/.local/bin
 BUILD     := .build/release
 BUNDLE    := build/Focus.app
 
-.PHONY: build test app install uninstall clean share
+.PHONY: hooks build test app install uninstall clean share
 
 build:
 	swift build -c release
@@ -20,8 +20,14 @@ TEST_FLAGS := -Xswiftc -F -Xswiftc $(CLT_DEV)/Frameworks \
               -Xlinker -rpath -Xlinker $(CLT_DEV)/Frameworks \
               -Xlinker -rpath -Xlinker $(CLT_DEV)/usr/lib
 
+# Run the tests before every push (once per clone).
+hooks:
+	git config core.hooksPath .githooks
+	@echo "Tests now run before every git push."
+
+# `make test FILTER=name` runs only matching tests.
 test:
-	swift test $(TEST_FLAGS)
+	swift test $(TEST_FLAGS) $(if $(FILTER),--filter $(FILTER))
 
 app: build
 	rm -rf $(BUNDLE)

@@ -348,8 +348,9 @@ final class QueueModel: ObservableObject {
     /// Saves the ignored-accounts list right away (no Connect needed).
     func setJiraIgnored(_ ids: [String]) {
         // Drop saved names for anyone no longer on the list.
-        if jiraIgnoredNames.keys.contains(where: { !ids.contains($0) }) {
-            jiraIgnoredNames = jiraIgnoredNames.filter { ids.contains($0.key) }
+        let pruned = SyncGuards.prunedNames(jiraIgnoredNames, keeping: ids)
+        if pruned != jiraIgnoredNames {
+            jiraIgnoredNames = pruned
             saveIgnoredNames()
         }
         var c = jiraConfig
@@ -437,15 +438,14 @@ final class QueueModel: ObservableObject {
                 let states = result.states
                 // A single empty answer from Jira (search hiccup) must not mark every ticket
                 // REMOVED. Act on "no sprint tickets" only when the next sync agrees.
-                let showing = items.contains { $0.source == .jira && Store.mentionKey($0.externalId ?? "") == nil
-                                               && $0.externalId?.contains("DEMO-") != true && !$0.removed }
-                if result.inScopeKeys.isEmpty && showing && emptySprintSyncs == 0 {
-                    emptySprintSyncs = 1
+                let guardResult = SyncGuards.holdEmptySprint(scopeIsEmpty: result.inScopeKeys.isEmpty,
+                                                             items: items, emptyBefore: emptySprintSyncs)
+                emptySprintSyncs = guardResult.empty
+                if guardResult.hold {
                     jiraSyncing = false
                     log.notice("jira sync: empty sprint result while tickets are showing; waiting for the next sync to confirm")
                     return
                 }
-                emptySprintSyncs = 0
                 let popped = applySync(result, site: site)
                 var mentionCount = 0, reportedCount = 0
                 if !jiraMentionsOn && !jiraReportedOn { jiraQuiet = false }

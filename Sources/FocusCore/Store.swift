@@ -313,7 +313,9 @@ public final class Store {
         try detach(id)
         try run("""
             UPDATE items SET back_seq = (SELECT COALESCE(MAX(back_seq), 0) + 1 FROM items),
-                             pop_seq = NULL, snoozed_until = NULL, placed_before = NULL, placed_seq = NULL
+                             pop_seq = NULL, snoozed_until = NULL,
+                             -- The very bottom, below rows dragged to the end too.
+                             placed_before = 0, placed_seq = (SELECT COALESCE(MAX(placed_seq), 0) + 1 FROM items)
             WHERE id = ?
             """, id)
     }

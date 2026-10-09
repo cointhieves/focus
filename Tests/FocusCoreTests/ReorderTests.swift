@@ -72,3 +72,14 @@ private func store() throws -> Store {
     try s.deleteIdea(b.id)                                // c keeps its spot (now last)
     #expect(try s.queue().map(\.title) == ["a", "c"])
 }
+
+@Test func skipGoesBelowRowsDraggedToTheEnd() throws {
+    let s = try store()
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+    let a = try s.addIdea("a", now: t0)
+    let b = try s.addIdea("b", now: t0.addingTimeInterval(1))
+    _ = try s.addIdea("c", now: t0.addingTimeInterval(2))
+    try s.place(a.id, before: nil)                        // b c a
+    try s.skip(b.id)                                      // b to the very bottom
+    #expect(try s.queue().map(\.title) == ["c", "a", "b"])
+}

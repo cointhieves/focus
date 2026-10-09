@@ -307,8 +307,13 @@ To check what went into a build:
 ```sh
 make build     # compile
 make test      # unit tests (works with the Command Line Tools only)
+make test FILTER=name   # just the matching tests
 make install   # build the app bundle and install it
+make hooks     # once per clone: run the tests before every git push
 ```
 
-`PLAN.md` records every design decision and why it was made. `DESIGN.md` has the original
-design.
+**Every bug fix comes with a test that fails without the fix.** Check it by undoing the fix
+and running that test. `Tests/FocusCoreTests/FakeNet.swift` answers Jira and Slack requests
+with canned JSON, so a sync can be tested exactly as it went wrong: see `JiraSyncTests` and
+`SlackSyncTests`. Decisions the app makes around a sync live in `SyncGuards`, outside the
+app target, so they can be tested too.

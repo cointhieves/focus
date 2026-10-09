@@ -52,16 +52,23 @@ import Testing
 
 /// End to end over real sockets, on both 127.0.0.1 and ::1: browsers may resolve
 /// "localhost" to either.
-@Test(arguments: ["127.0.0.1", "[::1]"])
+/// The two hosts run one after the other (not in parallel), and a port taken between
+/// picking and binding is retried, so the test can't fail on "address already in use".
+@Test(.serialized, arguments: ["127.0.0.1", "[::1]"])
 func callbackServerReceivesRedirect(host: String) async throws {
-    let port = freePort()
-    let server = try OAuthCallbackServer(port: port, path: "/slack/callback", state: "s1")
-    let outcome = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<OAuthCallbackServer.Outcome, Error>) in
-        server.start(timeout: 10) { cont.resume(returning: $0) }
-        Task {
-            try await Task.sleep(nanoseconds: 300_000_000)
-            _ = try? await URLSession.shared.data(from: URL(string: "http://\(host):\(port)/slack/callback?code=C9&state=s1")!)
+    var outcome: OAuthCallbackServer.Outcome = .failed("not run")
+    for _ in 0..<5 {
+        let port = freePort()
+        let server = try OAuthCallbackServer(port: port, path: "/slack/callback", state: "s1")
+        outcome = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<OAuthCallbackServer.Outcome, Error>) in
+            server.start(timeout: 10) { cont.resume(returning: $0) }
+            Task {
+                try await Task.sleep(nanoseconds: 300_000_000)
+                _ = try? await URLSession.shared.data(from: URL(string: "http://\(host):\(port)/slack/callback?code=C9&state=s1")!)
+            }
         }
+        if case .failed(let why) = outcome, why.contains("Address already in use") { continue }
+        break
     }
     #expect(outcome == .code("C9"))
 }

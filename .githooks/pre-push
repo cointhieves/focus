@@ -1,0 +1,10 @@
+#!/bin/sh
+# Runs the tests before every push; a failing test blocks the push.
+# Turn on once per clone with: make hooks   (bypass in an emergency: git push --no-verify)
+echo "pre-push: running tests..."
+if ! make -s test > /tmp/focus-pre-push.log 2>&1; then
+    grep -E "✘|error:" /tmp/focus-pre-push.log | head -20
+    echo "pre-push: tests failed, push blocked (full log: /tmp/focus-pre-push.log)"
+    exit 1
+fi
+grep -E "Test run with" /tmp/focus-pre-push.log | tail -1
