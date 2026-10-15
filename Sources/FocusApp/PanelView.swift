@@ -73,7 +73,8 @@ struct PanelView: View {
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                                         withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(item.id) }
                                     }
-                                }
+                                },
+                                onEdit: { model.editIdea(item.id, text: $0) }
                             )
                             .id(item.id)
                             // Drag a row anywhere; it lands just above the line shown.

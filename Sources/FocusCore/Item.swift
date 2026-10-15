@@ -34,7 +34,11 @@ public struct Item: Identifiable, Equatable, Sendable {
     public var waitingSince: Date?
     /// Boomeranged: sits at the bottom until this time, then pops back.
     public var snoozedUntil: Date?
+    /// When the current deadline was set (an edit), else nil = when the task was added.
+    public var dueSetAt: Date?
     public var removed: Bool { removedAt != nil }
+    /// Start of the deadline window that the warnings and colours measure.
+    public var deadlineStart: Date { dueSetAt ?? createdAt }
 
     public init(
         id: Int64,
@@ -52,7 +56,8 @@ public struct Item: Identifiable, Equatable, Sendable {
         warnedLevel: Int = 0,
         removedAt: Date? = nil,
         waitingSince: Date? = nil,
-        snoozedUntil: Date? = nil
+        snoozedUntil: Date? = nil,
+        dueSetAt: Date? = nil
     ) {
         self.id = id
         self.source = source
@@ -70,5 +75,6 @@ public struct Item: Identifiable, Equatable, Sendable {
         self.removedAt = removedAt
         self.waitingSince = waitingSince
         self.snoozedUntil = snoozedUntil
+        self.dueSetAt = dueSetAt
     }
 }

@@ -16,6 +16,8 @@ tool drives the same queue, which is handy for scripts and AI agents.
 Most recent first. To update, pull the latest code and run `make install` again.
 
 **October 6, 2026**
+- **Edit your tasks.** Right-click a task and choose **Edit** to change its text. Changing
+  the time in the text moves the deadline ("by friday 3pm"), and removing it removes the timer.
 - **Drag to reorder.** Drag any row up or down to put it where you want; a blue line shows
   where it lands. It stays there while normal rules carry on around it. When something new
   happens on it (a reply, a deadline), it jumps to the top as usual and, once you've dealt
@@ -152,6 +154,7 @@ app is built locally, it asks again after each rebuild.
 ## Using the queue
 
 - **Click** an item to open it in Jira or Slack.
+- **Right-click** a task and choose **Edit** to change its text or time.
 - **Drag** an item to reorder it (drag the header or bottom bar to move the panel).
 - **Hover** over an item for **Skip** (send it to the back of the line) and **Dismiss**
   (hide it until someone posts something new). Tasks get **Done** instead of Dismiss.

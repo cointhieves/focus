@@ -815,6 +815,20 @@ final class QueueModel: ObservableObject {
         pendingDone = nil
         write { try store.deleteIdea(item.id) }
     }
+    /// Edits a task's text (and re-reads its time). Returns an error message, or nil on success.
+    func editIdea(_ id: Int64, text: String) -> String? {
+        do {
+            try store.editIdea(id, text: text)
+            reload()
+            return nil
+        } catch let e as StoreError {
+            return e.description == "due time is in the past" ? "That time has already passed." :
+                   e.description == "task text is empty" ? "The task can't be empty." : e.description
+        } catch {
+            return "\(error)"
+        }
+    }
+
     func addIdea(_ text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         write { try store.addIdea(text) }

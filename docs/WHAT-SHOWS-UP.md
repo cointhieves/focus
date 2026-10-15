@@ -83,6 +83,10 @@ Tasks are items you add yourself. A deadline is set when the text contains:
   A date mid-sentence, or after "from", "since", "last", "about" or "of" ("notes from
   Monday"), is left as plain text.
 
+**Editing** a task (right-click → Edit) reads the text again, so it can add, move or remove
+the deadline. A changed deadline restarts its warnings from the moment you edit it; editing
+only the words keeps the deadline as it was.
+
 A day with no time means the **end of your workday** (Settings). A task that hits its
 deadline jumps to the top. Tasks stay until you mark them **Done**.
 
@@ -114,6 +118,7 @@ deadline jumps to the top. Tasks stay until you mark them **Done**.
 | **Dismiss** | Hides it until something new happens on it. |
 | **Boomerang** | Snoozes it for 2 business hours (a setting), or until something new happens. It returns to where it was. |
 | **Done** | Tasks only: deletes the task. |
+| **Edit** (right-click) | Tasks only: change the text, and with it the deadline. |
 
 ## FAQ
 

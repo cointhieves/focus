@@ -122,6 +122,14 @@ public final class Store {
             PRAGMA user_version = 10;
             """)
         }
+        if version < 11 {
+            // When a task's deadline was set (an edit can set a new one); warnings are measured
+            // from here. NULL = from created_at.
+            try exec("""
+            ALTER TABLE items ADD COLUMN due_set_at REAL;
+            PRAGMA user_version = 11;
+            """)
+        }
     }
 
     // MARK: - Reads
@@ -131,7 +139,7 @@ public final class Store {
     public func queue() throws -> [Item] {
         let rows = try query("""
             SELECT id, source, external_id, title, detail, url, created_at,
-                   last_my_response, pop_seq, back_seq, moved_at, due_at, warned_level, removed_at, waiting_since, snoozed_until
+                   last_my_response, pop_seq, back_seq, moved_at, due_at, warned_level, removed_at, waiting_since, snoozed_until, due_set_at
             FROM items
             WHERE dismissed_marker IS NULL OR dismissed_marker != change_marker
             """)
@@ -252,7 +260,7 @@ public final class Store {
         var warned: [Int64] = []
         for item in try queue() {
             guard let due = item.dueAt else { continue }
-            let level = Deadline.level(created: item.createdAt, due: due, now: now)
+            let level = Deadline.level(created: item.deadlineStart, due: due, now: now)
             guard level > item.warnedLevel else { continue }
             try detach(item.id)
             try run("""
@@ -360,6 +368,35 @@ public final class Store {
             return
         }
         try run("UPDATE items SET dismissed_marker = change_marker, placed_before = NULL, placed_seq = NULL WHERE id = ?", id)
+    }
+
+    /// Changes a task's text. The text is read again for a deadline, so editing can set,
+    /// change or remove the time; a changed time starts its warnings over. Tasks only.
+    @discardableResult
+    public func editIdea(_ id: Int64, text: String, now: Date = Date()) throws -> Item {
+        let existing = try item(id)
+        guard existing.source == .idea else {
+            throw StoreError(description: "item \(id) is a \(existing.source.rawValue) item; only tasks can be edited")
+        }
+        let parsed = Deadline.parse(text, now: now, endOfDayHour: (try? loadSettings())?.workEndHour ?? 17)
+        let title = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw StoreError(description: "task text is empty") }
+        if let due = parsed.due, due <= now { throw StoreError(description: "due time is in the past") }
+        // Within a minute counts as unchanged: the editor writes the time back rounded to the
+        // minute, and a text-only edit mustn't restart the warnings.
+        let sameDue: Bool = switch (parsed.due, existing.dueAt) {
+        case (nil, nil): true
+        case let (a?, b?): abs(a.timeIntervalSince(b)) < 60
+        default: false
+        }
+        if sameDue {
+            try run("UPDATE items SET title = ? WHERE id = ?", title, id)   // keep the exact time
+        } else {
+            // The warning window starts at the edit (the task keeps its place in the line).
+            try run("UPDATE items SET title = ?, due_at = ?, warned_level = 0, due_set_at = ? WHERE id = ?",
+                    title, parsed.due?.timeIntervalSince1970, now.timeIntervalSince1970, id)
+        }
+        return try item(id)
     }
 
     /// Permanently deletes a task (marking it done). Refuses Jira/Slack items, which a
@@ -668,7 +705,7 @@ public final class Store {
     public func item(_ id: Int64) throws -> Item {
         let rows = try query("""
             SELECT id, source, external_id, title, detail, url, created_at,
-                   last_my_response, pop_seq, back_seq, moved_at, due_at, warned_level, removed_at, waiting_since, snoozed_until
+                   last_my_response, pop_seq, back_seq, moved_at, due_at, warned_level, removed_at, waiting_since, snoozed_until, due_set_at
             FROM items WHERE id = ?
             """, id)
         guard let row = rows.first else { throw notFound(id) }
@@ -760,7 +797,8 @@ public final class Store {
                 warnedLevel: Int(int(12) ?? 0),
                 removedAt: double(13).map(Date.init(timeIntervalSince1970:)),
                 waitingSince: double(14).map(Date.init(timeIntervalSince1970:)),
-                snoozedUntil: double(15).map(Date.init(timeIntervalSince1970:))
+                snoozedUntil: double(15).map(Date.init(timeIntervalSince1970:)),
+                dueSetAt: double(16).map(Date.init(timeIntervalSince1970:))
             ))
         }
         return items

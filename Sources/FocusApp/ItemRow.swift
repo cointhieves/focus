@@ -79,6 +79,12 @@ struct ItemRow: View {
     let onOpen: (URL) -> Void
     /// Called after a task expands, so the panel can scroll it fully into view.
     var onExpanded: () -> Void = {}
+    /// Saves an edited task; returns an error message to show, or nil when saved.
+    var onEdit: (String) -> String? = { _ in nil }
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var editError = ""
+    @FocusState private var editFocused: Bool
     @State private var hovering = false
     @State private var sweep: CGFloat = -1
     /// Tasks have nowhere else to read them, so a click shows the whole text.
@@ -116,6 +122,46 @@ struct ItemRow: View {
     private var quiet: Bool { (item.removed || item.snoozedUntil != nil) && closing == nil }
 
     var body: some View {
+        if editing { editor } else { row }
+    }
+
+    /// In-place editor for a task: Return saves, Esc cancels. The time in the text is read again.
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField("Task", text: $draft, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13 * textScale))
+                .focused($editFocused)
+                .onSubmit(save)
+                .onExitCommand { editing = false; editError = "" }
+            HStack(spacing: 6) {
+                if !editError.isEmpty {
+                    Label(editError, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                } else {
+                    Text("Return to save, Esc to cancel. A time like \"by 5pm\" sets the deadline.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.system(size: 11 * textScale))
+        }
+        .padding(.vertical, 6).padding(.horizontal, 10)
+        .onAppear { DispatchQueue.main.async { editFocused = true } }
+    }
+
+    private func save() {
+        if let err = onEdit(draft) { editError = err } else { editing = false; editError = "" }
+    }
+
+    /// The text to start editing from: the title, plus the deadline written back as "by …".
+    private var editableText: String {
+        guard let due = item.dueAt else { return item.title }
+        let f = DateFormatter()
+        f.dateFormat = Calendar.current.isDateInToday(due) ? "h:mma"
+            : Calendar.current.isDateInTomorrow(due) ? "'tomorrow' h:mma" : "EEEE MMM d h:mma"
+        return "\(item.title) by \(f.string(from: due).lowercased())"
+    }
+
+    @ViewBuilder private var row: some View {
         let lit = highlighted || closing != nil
         let rowOpacity = lit ? 1.0 : contentOpacity
         let parts = RowParts(item, hideText: hideText)
@@ -157,6 +203,11 @@ struct ItemRow: View {
         .animation(.easeInOut(duration: 0.4), value: closing)
         .onHover { hovering = $0 }
         .modifier(Shake(animatableData: CGFloat(shakeToken)))
+        .contextMenu {
+            if item.source == .idea {
+                Button("Edit") { draft = editableText; editError = ""; editing = true }
+            }
+        }
     }
 
     private var iconSize: CGFloat {

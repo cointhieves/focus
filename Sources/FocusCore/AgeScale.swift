@@ -145,7 +145,7 @@ public struct AgeScale: Sendable {
             guard let due = item.dueAt else { return .none }
             if now >= due { return .red }
             // Blue for the first two thirds of the window, then ramp to red.
-            let left = Deadline.remainingFraction(created: item.createdAt, due: due, now: now)
+            let left = Deadline.remainingFraction(created: item.deadlineStart, due: due, now: now)
             return .due(left >= 1.0 / 3 ? 0 : 1 - left * 3)
         case .slack, .jira: break
         }
