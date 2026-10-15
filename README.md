@@ -16,6 +16,12 @@ tool drives the same queue, which is handy for scripts and AI agents.
 Most recent first. To update, pull the latest code and run `make install` again.
 
 **October 6, 2026**
+- **Task groups.** Group your tasks under a bold heading. Right-click any row and choose
+  **New group above** or **below** (or **Make this a group** on a task), then right-click the
+  heading to **Add task**, **Rename**, **Ungroup** or **Delete** it. Drag tasks into, out of
+  and between groups; the heading lights up when the task you're dragging would land in it.
+  Drag a heading to move the whole group. Inside a group, tasks with a deadline come first,
+  soonest first; when one of them is close to due, the whole group jumps to the top.
 - **Edit your tasks.** Right-click a task and choose **Edit** to change its text. Changing
   the time in the text moves the deadline ("by friday 3pm"), and removing it removes the timer.
 - **Drag to reorder.** Drag any row up or down to put it where you want; a blue line shows
@@ -154,7 +160,8 @@ app is built locally, it asks again after each rebuild.
 ## Using the queue
 
 - **Click** an item to open it in Jira or Slack.
-- **Right-click** a task and choose **Edit** to change its text or time.
+- **Right-click** a task and choose **Edit** to change its text or time, or to group tasks
+  (see [Task groups](docs/WHAT-SHOWS-UP.md#task-groups)).
 - **Drag** an item to reorder it (drag the header or bottom bar to move the panel).
 - **Hover** over an item for **Skip** (send it to the back of the line) and **Dismiss**
   (hide it until someone posts something new). Tasks get **Done** instead of Dismiss.

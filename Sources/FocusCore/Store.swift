@@ -130,6 +130,15 @@ public final class Store {
             PRAGMA user_version = 11;
             """)
         }
+        if version < 12 {
+            // Task groups: a heading is a task with is_group = 1; members point at it.
+            try exec("""
+            ALTER TABLE items ADD COLUMN is_group INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE items ADD COLUMN group_id INTEGER;
+            ALTER TABLE items ADD COLUMN group_seq INTEGER;
+            PRAGMA user_version = 12;
+            """)
+        }
     }
 
     // MARK: - Reads
@@ -139,7 +148,7 @@ public final class Store {
     public func queue() throws -> [Item] {
         let rows = try query("""
             SELECT id, source, external_id, title, detail, url, created_at,
-                   last_my_response, pop_seq, back_seq, moved_at, due_at, warned_level, removed_at, waiting_since, snoozed_until, due_set_at
+                   last_my_response, pop_seq, back_seq, moved_at, due_at, warned_level, removed_at, waiting_since, snoozed_until, due_set_at, is_group, group_id, group_seq
             FROM items
             WHERE dismissed_marker IS NULL OR dismissed_marker != change_marker
             """)
@@ -154,7 +163,7 @@ public final class Store {
             try run("UPDATE items SET placed_before = ? WHERE id = ?", next, id)
             pl[id] = (next, p.seq)
         }
-        let result = QueueOrder.applyPlacements(sorted, placements: pl)
+        let result = QueueOrder.applyGroups(QueueOrder.applyPlacements(sorted, placements: pl))
         lastShown = result.map(\.id)
         return result
     }
@@ -238,7 +247,8 @@ public final class Store {
     /// Adds a task (stored with source "idea"). "... by 5pm" or "... in 30 minutes" in the text sets a deadline,
     /// unless `due` is passed explicitly.
     @discardableResult
-    public func addIdea(_ text: String, due explicitDue: Date? = nil, now: Date = Date()) throws -> Item {
+    public func addIdea(_ text: String, due explicitDue: Date? = nil, toGroup group: Int64? = nil,
+                        now: Date = Date()) throws -> Item {
         let parsed: (title: String, due: Date?) =
             explicitDue == nil ? Deadline.parse(text, now: now, endOfDayHour: (try? loadSettings())?.workEndHour ?? 17) : (text, nil)
         let title = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -247,8 +257,8 @@ public final class Store {
         if let due, due <= now { throw StoreError(description: "due time is in the past") }
         let item = try insert(source: .idea, externalId: nil, title: title, detail: "task",
                               url: nil, lastMyResponse: nil, now: now)
-        guard let due else { return item }
-        try run("UPDATE items SET due_at = ? WHERE id = ?", due.timeIntervalSince1970, item.id)
+        if let due { try run("UPDATE items SET due_at = ? WHERE id = ?", due.timeIntervalSince1970, item.id) }
+        if let group { try moveTask(item.id, toGroup: group) }
         return try self.item(item.id)
     }
 
@@ -319,6 +329,15 @@ public final class Store {
     public func skip(_ id: Int64) throws {
         try requireExists(id)
         try detach(id)
+        if let g = try item(id).groupId {
+            // In a group: to the bottom of the group, not the panel.
+            try run("""
+                UPDATE items SET pop_seq = NULL, snoozed_until = NULL,
+                                 group_seq = (SELECT COALESCE(MAX(group_seq), 0) + 1 FROM items WHERE group_id = ?)
+                WHERE id = ?
+                """, g, id)
+            return
+        }
         try run("""
             UPDATE items SET back_seq = (SELECT COALESCE(MAX(back_seq), 0) + 1 FROM items),
                              pop_seq = NULL, snoozed_until = NULL,
@@ -375,8 +394,8 @@ public final class Store {
     @discardableResult
     public func editIdea(_ id: Int64, text: String, now: Date = Date()) throws -> Item {
         let existing = try item(id)
-        guard existing.source == .idea else {
-            throw StoreError(description: "item \(id) is a \(existing.source.rawValue) item; only tasks can be edited")
+        guard existing.source == .idea, !existing.isGroup else {
+            throw StoreError(description: "only tasks can be edited")
         }
         let parsed = Deadline.parse(text, now: now, endOfDayHour: (try? loadSettings())?.workEndHour ?? 17)
         let title = parsed.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -393,10 +412,89 @@ public final class Store {
             try run("UPDATE items SET title = ? WHERE id = ?", title, id)   // keep the exact time
         } else {
             // The warning window starts at the edit (the task keeps its place in the line).
-            try run("UPDATE items SET title = ?, due_at = ?, warned_level = 0, due_set_at = ? WHERE id = ?",
+            try run("UPDATE items SET title = ?, due_at = ?, warned_level = 0, due_set_at = ?, pop_seq = NULL WHERE id = ?",
                     title, parsed.due?.timeIntervalSince1970, now.timeIntervalSince1970, id)
         }
         return try item(id)
+    }
+
+    // MARK: - Groups
+
+    /// Turns a task into an empty group heading (tasks are added to it afterwards). The
+    /// heading drops its deadline.
+    public func makeGroup(_ id: Int64) throws {
+        let existing = try item(id)
+        guard existing.source == .idea, !existing.isGroup, existing.groupId == nil else {
+            throw StoreError(description: "only a task that isn't in a group can become a group")
+        }
+        try run("""
+            UPDATE items SET is_group = 1, due_at = NULL, warned_level = 0, due_set_at = NULL,
+                             pop_seq = NULL, snoozed_until = NULL WHERE id = ?
+            """, id)
+    }
+
+    /// Creates a new, empty group named `name`, placed just above or below `near`
+    /// (nil = at the end of the list).
+    @discardableResult
+    public func addGroup(_ name: String, near: Int64? = nil, above: Bool = true, now: Date = Date()) throws -> Item {
+        let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw StoreError(description: "group name is empty") }
+        let g = try insert(source: .idea, externalId: nil, title: title, detail: "task", url: nil,
+                           lastMyResponse: nil, now: now)
+        try run("UPDATE items SET is_group = 1 WHERE id = ?", g.id)
+        // Place it next to `near` at the top level (a grouped row's heading stands in).
+        var anchor = near
+        if let n = near, let gid = try item(n).groupId { anchor = gid }
+        let order = try queue().filter { $0.groupId == nil && $0.id != g.id }.map(\.id)
+        if let a = anchor, let i = order.firstIndex(of: a) {
+            let before: Int64? = above ? a : (i + 1 < order.count ? order[i + 1] : nil)
+            try place(g.id, before: before)
+        } else {
+            try place(g.id, before: nil)
+        }
+        return try item(g.id)
+    }
+
+    /// Puts a task into `group` (nil = out of any group). Inside a group, `before` is the
+    /// group task it goes above (nil = end of the group's untimed tasks). Out of a group,
+    /// `before` is the top-level row it lands above (nil = end of the list).
+    public func moveTask(_ id: Int64, toGroup group: Int64?, before: Int64? = nil) throws {
+        let t = try item(id)
+        guard t.source == .idea, !t.isGroup else { throw StoreError(description: "only tasks can move between groups") }
+        if let group {
+            guard try item(group).isGroup else { throw StoreError(description: "item \(group) is not a group") }
+            try detach(id)
+            // Make room: everything from `before` down shifts by one.
+            let seq: Int64
+            if let b = before, let bs = try item(b).groupSeq, try item(b).groupId == group {
+                try run("UPDATE items SET group_seq = group_seq + 1 WHERE group_id = ? AND group_seq >= ?", group, bs)
+                seq = bs
+            } else {
+                seq = (try scalarInt("SELECT COALESCE(MAX(group_seq), 0) + 1 FROM items WHERE group_id = \(group)")) ?? 1
+            }
+            try run("""
+                UPDATE items SET group_id = ?, group_seq = ?, placed_before = NULL, placed_seq = NULL,
+                                 back_seq = NULL WHERE id = ?
+                """, group, seq, id)
+        } else {
+            try run("UPDATE items SET group_id = NULL, group_seq = NULL WHERE id = ?", id)
+            try place(id, before: before)
+        }
+    }
+
+    /// Renames a group heading.
+    public func renameGroup(_ id: Int64, to name: String) throws {
+        guard try item(id).isGroup else { throw StoreError(description: "item \(id) is not a group") }
+        let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw StoreError(description: "group name is empty") }
+        try run("UPDATE items SET title = ? WHERE id = ?", title, id)
+    }
+
+    /// Turns a heading back into an ordinary task; its tasks rejoin the normal order.
+    public func ungroup(_ id: Int64) throws {
+        guard try item(id).isGroup else { throw StoreError(description: "item \(id) is not a group") }
+        try run("UPDATE items SET group_id = NULL, group_seq = NULL WHERE group_id = ?", id)
+        try run("UPDATE items SET is_group = 0 WHERE id = ?", id)
     }
 
     /// Permanently deletes a task (marking it done). Refuses Jira/Slack items, which a
@@ -407,6 +505,7 @@ public final class Store {
             throw StoreError(description: "item \(id) is a \(existing.source.rawValue) item; use dismiss instead")
         }
         try detach(id)
+        try run("UPDATE items SET group_id = NULL, group_seq = NULL WHERE group_id = ?", id)
         try run("DELETE FROM items WHERE id = ?", id)
     }
 
@@ -705,7 +804,7 @@ public final class Store {
     public func item(_ id: Int64) throws -> Item {
         let rows = try query("""
             SELECT id, source, external_id, title, detail, url, created_at,
-                   last_my_response, pop_seq, back_seq, moved_at, due_at, warned_level, removed_at, waiting_since, snoozed_until, due_set_at
+                   last_my_response, pop_seq, back_seq, moved_at, due_at, warned_level, removed_at, waiting_since, snoozed_until, due_set_at, is_group, group_id, group_seq
             FROM items WHERE id = ?
             """, id)
         guard let row = rows.first else { throw notFound(id) }
@@ -800,6 +899,9 @@ public final class Store {
                 snoozedUntil: double(15).map(Date.init(timeIntervalSince1970:)),
                 dueSetAt: double(16).map(Date.init(timeIntervalSince1970:))
             ))
+            items[items.count - 1].isGroup = int(17) == 1
+            items[items.count - 1].groupId = int(18)
+            items[items.count - 1].groupSeq = int(19)
         }
         return items
     }

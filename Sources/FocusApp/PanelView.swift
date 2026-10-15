@@ -25,6 +25,8 @@ struct PanelView: View {
     /// Drag-to-reorder: the row being dragged, and the row it would land above (-1 = end).
     @State private var dragging: Int64?
     @State private var dropTarget: Int64?
+    /// The group a dragged task would join (nil = top level).
+    @State private var dropGroup: Int64?
     /// A drag just ended on a row; swallow the click that a mouse-up on a row also sends.
     @State private var dragEndedAt = Date.distantPast
     @State private var hoveringRows = false
@@ -38,6 +40,8 @@ struct PanelView: View {
         let contentOpacity = fade.awake ? 1.0 : fade.idleOpacity
         let now = model.now
         let hidden = hiddenCount
+        let groupCounts = model.groupCounts
+        let groupList = model.groups
 
         VStack(alignment: .leading, spacing: 6) {
             header.opacity(contentOpacity)
@@ -55,7 +59,10 @@ struct PanelView: View {
                                 tooltip: "\(item.detail) · \(ageLabel(item, now: now))",
                                 contentOpacity: contentOpacity,
                                 shakeToken: model.shakeTokens[item.id] ?? 0,
-                                highlighted: model.isHighlighted(item.id, now: now),
+                                highlighted: model.isHighlighted(item.id, now: now)
+                                    || (item.isGroup && model.groupHasAlert(item.id))
+                                    // The group a dragged task would land in.
+                                    || (item.isGroup && dragging != nil && dropGroup == item.id),
                                 closing: model.closingPhase(item.id, now: now),
                                 textScale: model.settings.textScale,
                                 hideText: model.settings.hideMessageText,
@@ -74,7 +81,17 @@ struct PanelView: View {
                                         withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(item.id) }
                                     }
                                 },
-                                onEdit: { model.editIdea(item.id, text: $0) }
+                                onEdit: { model.editIdea(item.id, text: $0) },
+                                groupCount: groupCounts[item.id] ?? 0,
+                                indented: item.groupId != nil,
+                                onMakeGroup: { model.makeGroup(item.id) },
+                                onUngroup: { model.ungroup(item.id) },
+                                groups: groupList,
+                                onMoveToGroup: { model.moveTask(item.id, toGroup: $0, before: nil) },
+                                onNewGroup: { model.addGroup(near: item.id, above: $0) },
+                                onDeleteGroup: { model.deleteGroup(item.id) },
+                                onRename: { model.renameGroup(item.id, to: $0) },
+                                onAddTask: { model.addTask($0, toGroup: item.id) }
                             )
                             .id(item.id)
                             // Drag a row anywhere; it lands just above the line shown.
@@ -82,7 +99,9 @@ struct PanelView: View {
                             .simultaneousGesture(reorderGesture(item.id))
                             .overlay(alignment: .top) {
                                 if dragging != nil, dropTarget == item.id {
+                                    // Indented line = lands inside the group.
                                     Rectangle().fill(Color.accentColor).frame(height: 2).offset(y: -1)
+                                        .padding(.leading, dropGroup != nil ? 18 : 0)
                                 }
                             }
                             .background(GeometryReader { geo in
@@ -95,6 +114,7 @@ struct PanelView: View {
                         // Shows where a row dragged past the last one will land.
                         Rectangle().fill(dragging != nil && dropTarget == -1 ? Color.accentColor : .clear)
                             .frame(height: 2)
+                            .padding(.leading, dropGroup != nil ? 18 : 0)
                     }
                     .id("top")
                     .background(GeometryReader { geo in
@@ -199,22 +219,48 @@ struct PanelView: View {
         return model.items.count - visible
     }
 
-    /// Drag a row to reorder. The target is the first other row whose middle is below the
-    /// pointer; past the last row it goes to the end.
+    /// Drag a row to reorder. A task can also move into, out of and between groups:
+    /// - dropped above a row inside a group, it joins that group just above that row;
+    /// - dropped just after a group with the pointer indented, it joins that group at the end;
+    /// - otherwise it goes to the top level.
+    /// Headings, Jira and Slack rows only move at the top level (a heading takes its group).
     private func reorderGesture(_ id: Int64) -> some Gesture {
         DragGesture(minimumDistance: 6, coordinateSpace: .named("scroll"))
             .onChanged { g in
                 if dragging == nil { dragging = id; onRowsHover(true) }
+                let rows = model.displayItems
+                guard let me = rows.first(where: { $0.id == id }) else { return }
+                let canJoin = me.source == .idea && !me.isGroup
                 let y = g.location.y
-                let below = model.displayItems.first { other in
-                    other.id != id && (rowFrames[other.id].map { $0.midY > y } ?? false)
-                }
+                let candidates = rows.filter { $0.id != id && (canJoin || $0.groupId == nil) }
+                let below = candidates.first { rowFrames[$0.id].map { $0.midY > y } ?? false }
                 dropTarget = below?.id ?? -1
+                // Which group would it land in?
+                if canJoin, let b = below, let g = b.groupId { dropGroup = g; return }
+                // Just after a group (or at the end): indented pointer = end of that group.
+                let idx = below.flatMap { b in rows.firstIndex { $0.id == b.id } } ?? rows.count
+                let prev = rows[..<idx].last { $0.id != id }
+                let lastGroup = prev.flatMap { $0.isGroup ? $0.id : $0.groupId }
+                dropGroup = canJoin && g.location.x > 40 ? lastGroup : nil
             }
             .onEnded { _ in
-                defer { dragging = nil; dropTarget = nil; dragEndedAt = Date(); onRowsHover(hoveringRows) }
+                defer { dragging = nil; dropTarget = nil; dropGroup = nil; dragEndedAt = Date(); onRowsHover(hoveringRows) }
                 guard dragging == id, let target = dropTarget else { return }
-                model.place(id, before: target == -1 ? nil : target)
+                var before: Int64? = target == -1 ? nil : target
+                guard let me = model.displayItems.first(where: { $0.id == id }) else { return }
+                // Out of a group, a top-level slot is needed: a row inside a group stands for
+                // its heading's position, so land just above that heading.
+                if dropGroup == nil, let b = before, let g = model.displayItems.first(where: { $0.id == b })?.groupId {
+                    before = g
+                }
+                if me.source == .idea && !me.isGroup && (dropGroup != nil || me.groupId != nil) {
+                    let inGroup = dropGroup.flatMap { g in
+                        model.displayItems.first { $0.id == before }?.groupId == g ? before : nil
+                    }
+                    model.moveTask(id, toGroup: dropGroup, before: dropGroup == nil ? before : inGroup)
+                } else {
+                    model.place(id, before: before)
+                }
             }
     }
 

@@ -53,6 +53,40 @@ public enum QueueOrder {
         return out
     }
 
+    /// Puts each group's tasks right under its heading: tasks whose warning fired first, then
+    /// timed tasks soonest first, then untimed ones in group order, then boomeranged ones.
+    /// A group with a fired task moves to the very top (several: earliest deadline first).
+    public static func applyGroups(_ items: [Item]) -> [Item] {
+        let headings = Set(items.filter(\.isGroup).map(\.id))
+        let members = Dictionary(grouping: items.filter { $0.groupId.map(headings.contains) ?? false },
+                                 by: { $0.groupId! })
+        guard !headings.isEmpty else { return items }
+        func fired(_ i: Item) -> Bool { i.popSeq != nil && i.snoozedUntil == nil && i.dueAt != nil }
+        func rank(_ i: Item) -> Int { i.snoozedUntil != nil ? 3 : fired(i) ? 0 : i.dueAt != nil ? 1 : 2 }
+        func ordered(_ g: Int64) -> [Item] {
+            (members[g] ?? []).sorted { a, b in
+                let ra = rank(a), rb = rank(b)
+                if ra != rb { return ra < rb }
+                switch ra {
+                case 0, 1: return a.dueAt! != b.dueAt! ? a.dueAt! < b.dueAt! : a.id < b.id
+                case 3: return a.snoozedUntil! < b.snoozedUntil!
+                default: return (a.groupSeq ?? 0, a.id) < (b.groupSeq ?? 0, b.id)
+                }
+            }
+        }
+        var top: [(due: Date, block: [Item])] = [], rest: [Item] = []
+        for item in items where !(item.groupId.map(headings.contains) ?? false) {
+            guard item.isGroup else { rest.append(item); continue }
+            let block = [item] + ordered(item.id)
+            if let due = block.dropFirst().filter(fired).compactMap(\.dueAt).min() {
+                top.append((due, block))
+            } else {
+                rest += block
+            }
+        }
+        return top.sorted { $0.due < $1.due }.flatMap(\.block) + rest
+    }
+
     static func tier(_ item: Item) -> Int {
         if item.snoozedUntil != nil { return 3 }
         if item.backSeq != nil { return 2 }

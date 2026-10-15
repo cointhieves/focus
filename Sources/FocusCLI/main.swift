@@ -59,8 +59,10 @@ func list(_ store: Store, json: Bool) throws {
                 "source": item.source == .idea ? "task" : item.source.rawValue,
                 "title": item.title,
                 "detail": item.detail,
-                "band": item.snoozedUntil != nil ? "snoozed" : item.removed ? "removed" : bandName(scale.band(for: item, now: now)),
+                "band": item.isGroup ? "group" : item.snoozedUntil != nil ? "snoozed" : item.removed ? "removed" : bandName(scale.band(for: item, now: now)),
             ]
+            if item.isGroup { row["group"] = true }
+            if let g = item.groupId { row["group_id"] = g }
             if let until = item.snoozedUntil { row["snoozed_until"] = ISO8601DateFormatter().string(from: until) }
             if item.removed { row["removed"] = true }
             row["url"] = item.url?.absoluteString
@@ -84,11 +86,13 @@ func list(_ store: Store, json: Bool) throws {
     // Color the band only when writing to a terminal, so piped output stays clean.
     let tty = isatty(STDOUT_FILENO) != 0
     for (position, item) in items.enumerated() {
-        let band = item.snoozedUntil != nil ? "snoozed" : item.removed ? "removed" : bandName(scale.band(for: item, now: now))
+        let band = item.isGroup ? "group" : item.snoozedUntil != nil ? "snoozed" : item.removed ? "removed" : bandName(scale.band(for: item, now: now))
         let age = item.snoozedUntil != nil ? AgeLabel.text(for: item, scale: scale, now: now) : item.dueAt.map { "due " + Deadline.countdown(to: $0, now: now) }
             ?? (item.source == .idea ? "-" : AgeLabel.text(for: item, scale: scale, now: now))
         let label = tty ? colored(band) : band
-        print("\(position + 1). [\(item.id)] \(label)  \(item.source == .idea ? "task" : item.source.rawValue)  \(age)  \(item.title)")
+        if item.isGroup { print("\(position + 1). [\(item.id)] \(label)  \(item.title)"); continue }
+        let indent = item.groupId != nil ? "    " : ""
+        print("\(indent)\(position + 1). [\(item.id)] \(label)  \(item.source == .idea ? "task" : item.source.rawValue)  \(age)  \(item.title)")
     }
 }
 

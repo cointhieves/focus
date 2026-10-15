@@ -81,6 +81,20 @@ struct ItemRow: View {
     var onExpanded: () -> Void = {}
     /// Saves an edited task; returns an error message to show, or nil when saved.
     var onEdit: (String) -> String? = { _ in nil }
+    /// Groups: tasks in this heading, whether this row sits in a group, and the menu actions.
+    var groupCount = 0
+    var indented = false
+    var onMakeGroup: (() -> Void)? = nil
+    var onUngroup: (() -> Void)? = nil
+    var groups: [Item] = []
+    var onMoveToGroup: ((Int64?) -> Void)? = nil
+    var onNewGroup: ((Bool) -> Void)? = nil     // true = above
+    var onDeleteGroup: (() -> Void)? = nil
+    var onRename: ((String) -> String?)? = nil
+    var onAddTask: ((String) -> String?)? = nil
+    /// Heading inline editors: rename, or a new task added straight into the group.
+    @State private var renaming = false
+    @State private var addingTask = false
     @State private var editing = false
     @State private var draft = ""
     @State private var editError = ""
@@ -122,7 +136,82 @@ struct ItemRow: View {
     private var quiet: Bool { (item.removed || item.snoozedUntil != nil) && closing == nil }
 
     var body: some View {
-        if editing { editor } else { row }
+        if editing { editor }
+        else if item.isGroup { heading }
+        else { row.padding(.leading, indented ? 18 : 0) }
+    }
+
+    /// A group heading: bold name and a count, no colour strip, no age. Right-click to add a
+    /// task, rename, ungroup or delete. Below it, an inline box when adding a task.
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if renaming {
+                inlineField(placeholder: "Group name", hint: "Return to rename, Esc to cancel.") { text in
+                    if let err = onRename?(text) { return err }
+                    renaming = false; return nil
+                } cancel: { renaming = false }
+            } else {
+                headingLabel
+            }
+            if addingTask {
+                inlineField(placeholder: "New task in \(item.title)", hint: "Return to add, Esc to cancel. \"by 5pm\" sets a deadline.") { text in
+                    if let err = onAddTask?(text) { return err }
+                    addingTask = false; return nil
+                } cancel: { addingTask = false }
+                .padding(.leading, 18)
+            }
+        }
+    }
+
+    private var headingLabel: some View {
+        let lit = highlighted
+        return HStack(spacing: 8) {
+            Text(item.title)
+                .font(.system(size: 13 * textScale, weight: .bold))
+                .lineLimit(1)
+            Text("\(groupCount)")
+                .font(.system(size: 11 * textScale, weight: .semibold))
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(.quaternary, in: Capsule())
+            Spacer()
+        }
+        .opacity(lit ? 1 : contentOpacity)
+        .padding(.top, 10).padding(.bottom, 4).padding(.horizontal, 10)
+        .contentShape(Rectangle())
+        .background {
+            if lit { RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.18)) }
+        }
+        .contextMenu {
+            Button("Add task") { draft = ""; editError = ""; addingTask = true }
+            Button("Rename") { draft = item.title; editError = ""; renaming = true }
+            Divider()
+            if let onUngroup { Button("Ungroup (keep its tasks)") { onUngroup() } }
+            if let onDeleteGroup { Button("Delete group (keep its tasks)") { onDeleteGroup() } }
+        }
+        .help("Group. Right-click to add a task, rename, ungroup or delete.")
+    }
+
+    /// One-line inline editor: Return runs `save` (an error message keeps it open), Esc cancels.
+    private func inlineField(placeholder: String, hint: String, save: @escaping (String) -> String?,
+                             cancel: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField(placeholder, text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13 * textScale))
+                .focused($editFocused)
+                .onSubmit { if let err = save(draft) { editError = err } else { editError = "" } }
+                .onExitCommand { editError = ""; cancel() }
+            Group {
+                if !editError.isEmpty {
+                    Label(editError, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                } else {
+                    Text(hint).foregroundStyle(.secondary)
+                }
+            }
+            .font(.system(size: 11 * textScale))
+        }
+        .padding(.vertical, 6).padding(.horizontal, 10)
+        .onAppear { DispatchQueue.main.async { editFocused = true } }
     }
 
     /// In-place editor for a task: Return saves, Esc cancels. The time in the text is read again.
@@ -206,6 +295,26 @@ struct ItemRow: View {
         .contextMenu {
             if item.source == .idea {
                 Button("Edit") { draft = editableText; editError = ""; editing = true }
+                if let onMoveToGroup {
+                    let targets = groups.filter { $0.id != item.groupId }
+                    if !targets.isEmpty {
+                        Menu("Move to group") {
+                            ForEach(targets) { g in Button(g.title) { onMoveToGroup(g.id) } }
+                        }
+                    }
+                    if item.groupId != nil { Button("Remove from group") { onMoveToGroup(nil) } }
+                }
+                Divider()
+                if let onNewGroup {
+                    Button("New group above") { onNewGroup(true) }
+                    Button("New group below") { onNewGroup(false) }
+                }
+                if let onMakeGroup, item.groupId == nil {
+                    Button("Make this a group") { onMakeGroup() }
+                }
+            } else if let onNewGroup {
+                Button("New group above") { onNewGroup(true) }
+                Button("New group below") { onNewGroup(false) }
             }
         }
     }

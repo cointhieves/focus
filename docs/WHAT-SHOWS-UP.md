@@ -10,6 +10,7 @@ update this page in the same commit.
 - [Jira](#jira)
 - [Slack](#slack)
 - [Tasks](#tasks)
+- [Task groups](#task-groups)
 - [Timing](#timing)
 - [What you can do with an item](#what-you-can-do-with-an-item)
 - [FAQ](#faq)
@@ -89,6 +90,33 @@ only the words keeps the deadline as it was.
 
 A day with no time means the **end of your workday** (Settings). A task that hits its
 deadline jumps to the top. Tasks stay until you mark them **Done**.
+
+## Task groups
+
+Groups hold your own **tasks** only; Jira and Slack items never join one.
+
+| Action | How |
+|---|---|
+| Create a group | Right-click any row → **New group above / below**, or a task → **Make this a group** (it becomes an empty heading) |
+| Add a task to it | Right-click the heading → **Add task**, or drag a task in |
+| Rename | Right-click the heading → **Rename** |
+| Move a task | Drag it to another group, or right-click → **Move to group** |
+| Take a task out | Drag it out, or right-click → **Remove from group** |
+| Remove the group | Right-click the heading → **Ungroup** or **Delete group**; its tasks return to the list either way |
+| Move the whole group | Drag its heading |
+
+While dragging, a blue line shows where the task lands (indented = inside a group) and the
+heading of the group it would join lights up. To add a task at the end of a group, drop it
+just below the group's last task with the pointer moved slightly right.
+
+**Order inside a group:** tasks with a deadline first, soonest first, then the others in the
+order you put them. A deadline task's place comes from its time, so dragging it only picks
+the group.
+
+**When a grouped task is close to due** (its 10%, 5% or due warning fires), it goes to the top
+of its group and the whole group jumps to the top of the panel, heading lit. Done, Skip,
+Boomerang, or editing it to a later time sends the group back. **Skip** inside a group sends
+the task to the bottom of its group.
 
 ## Timing
 

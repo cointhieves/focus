@@ -36,6 +36,11 @@ public struct Item: Identifiable, Equatable, Sendable {
     public var snoozedUntil: Date?
     /// When the current deadline was set (an edit), else nil = when the task was added.
     public var dueSetAt: Date?
+    /// A task turned into a group heading.
+    public var isGroup = false
+    /// The heading this task belongs to, and its order among the group's untimed tasks.
+    public var groupId: Int64?
+    public var groupSeq: Int64?
     public var removed: Bool { removedAt != nil }
     /// Start of the deadline window that the warnings and colours measure.
     public var deadlineStart: Date { dueSetAt ?? createdAt }

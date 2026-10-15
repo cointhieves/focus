@@ -829,6 +829,36 @@ final class QueueModel: ObservableObject {
         }
     }
 
+    func makeGroup(_ id: Int64) { write { try store.makeGroup(id) } }
+    func addGroup(near id: Int64?, above: Bool) { write { try store.addGroup("New group", near: id, above: above) } }
+    func moveTask(_ id: Int64, toGroup group: Int64?, before: Int64?) {
+        write { try store.moveTask(id, toGroup: group, before: before) }
+    }
+    func deleteGroup(_ id: Int64) { write { try store.deleteIdea(id) } }
+    /// Returns an error message, or nil when saved.
+    func renameGroup(_ id: Int64, to name: String) -> String? {
+        do { try store.renameGroup(id, to: name); reload(); return nil }
+        catch { return "The name can't be empty." }
+    }
+    func addTask(_ text: String, toGroup group: Int64) -> String? {
+        do { try store.addIdea(text, toGroup: group); reload(); return nil }
+        catch let e as StoreError {
+            return e.description == "due time is in the past" ? "That time has already passed." :
+                   e.description == "task text is empty" ? "The task can't be empty." : e.description
+        } catch { return "\(error)" }
+    }
+    /// Groups in display order, for "Move to group".
+    var groups: [Item] { items.filter(\.isGroup) }
+    func ungroup(_ id: Int64) { write { try store.ungroup(id) } }
+    /// Tasks in each group (heading id -> count).
+    var groupCounts: [Int64: Int] {
+        Dictionary(grouping: items.compactMap(\.groupId), by: { $0 }).mapValues(\.count)
+    }
+    /// A heading lights up while one of its tasks has a fired warning.
+    func groupHasAlert(_ id: Int64) -> Bool {
+        items.contains { $0.groupId == id && $0.popSeq != nil && $0.snoozedUntil == nil && $0.dueAt != nil }
+    }
+
     func addIdea(_ text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         write { try store.addIdea(text) }
