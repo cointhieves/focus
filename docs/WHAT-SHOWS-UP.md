@@ -136,6 +136,22 @@ the task to the bottom of its group.
 - Turning a source or checkbox **off hides** its items; it doesn't delete them. Turning it
   back on restores them without popping everything again.
 
+## When Focus is hidden
+
+Settings → Panel → **While hidden** decides what a hidden Focus (⌃⌥F, middle-click, the menu,
+or hidden while you reply) does when something happens:
+
+| Setting | Needs you (message, reply, mention, deadline, boomerang) | Closed / responded / removed |
+|---|---|---|
+| **Show for things that need me** (default) | Comes back and stays | Comes back for the farewell, then hides again |
+| **Show for everything** | Comes back and stays | Comes back and stays |
+| **Never show** | Stays hidden | Stays hidden |
+
+If something that needs you arrives while Focus is up for a farewell, it stays. If you show or
+hide Focus yourself in the meantime, it won't hide again on its own. With **Never show**,
+items still wait in the panel for when you open it, but you may not see that someone is
+waiting on you.
+
 ## What you can do with an item
 
 | Action | What it does |

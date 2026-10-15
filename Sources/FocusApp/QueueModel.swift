@@ -17,6 +17,11 @@ final class QueueModel: ObservableObject {
     /// Bumped whenever something lights up (new item, reply, deadline, boomerang back,
     /// farewell). A hidden panel comes back for it: alerts must be seen.
     @Published private(set) var alertTick = 0
+    /// What the latest light-up was: true = something needs you, false = a farewell only
+    /// (CLOSED, RESPONDED, REMOVED). Read when alertTick changes.
+    private(set) var lastAlertNeedsYou = true
+    /// How long the latest farewell plays, so a re-hide can wait for it.
+    private(set) var lastFarewellSeconds: TimeInterval = 0
     /// Ticks every second so colors and countdowns stay current.
     @Published private(set) var now = Date()
 
@@ -74,6 +79,8 @@ final class QueueModel: ObservableObject {
         guard !removed.isEmpty else { return }
         let start = Date()
         farewells += removed.map { Farewell(item: $0.0, index: $0.1, start: start, kind: kind) }
+        lastAlertNeedsYou = false
+        lastFarewellSeconds = kind.total
         alertTick += 1
         withAnimation(.linear(duration: 0.6)) {
             for (item, _) in removed { shakeTokens[item.id, default: 0] += 1 }
@@ -1054,6 +1061,7 @@ final class QueueModel: ObservableObject {
                 }
             }
             lastMovement = Date()
+            lastAlertNeedsYou = true
             alertTick += 1
         } catch {
             log.error("reload failed: \(String(describing: error), privacy: .public)")

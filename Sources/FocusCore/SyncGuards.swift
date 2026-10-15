@@ -18,4 +18,16 @@ public enum SyncGuards {
     public static func prunedNames(_ names: [String: String], keeping ids: [String]) -> [String: String] {
         names.filter { ids.contains($0.key) }
     }
+
+    /// What a HIDDEN panel does when something lights up. `needsYou` is true for a new
+    /// message, reply, mention, deadline or returning boomerang; false for a farewell only
+    /// (CLOSED, RESPONDED, REMOVED). Things that need you always win.
+    public enum HiddenAction: Equatable { case stayHidden, showAndStay, showThenHide }
+    public static func hiddenPanelAction(needsYou: Bool, setting: WhileHidden) -> HiddenAction {
+        switch setting {
+        case .never: return .stayHidden
+        case .stay: return .showAndStay
+        case .farewellsHide: return needsYou ? .showAndStay : .showThenHide
+        }
+    }
 }

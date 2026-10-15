@@ -26,6 +26,8 @@ public struct FocusSettings: Equatable, Sendable {
     public var hideAfterOpenMinutes: Double = 5
     /// Show only who/where for Slack items, not the message text (for screen sharing).
     public var hideMessageText = false
+    /// What a hidden panel does when something happens (see `WhileHidden`).
+    public var whileHidden: WhileHidden = .farewellsHide
 
     public init() {}
 
@@ -60,7 +62,8 @@ public struct FocusSettings: Equatable, Sendable {
          ("red_at_hours", redAtHours), ("text_scale", textScale),
          ("slack_green_hours", slackGreenHours), ("slack_red_hours", slackRedHours),
          ("work_start_hour", workStartHour), ("work_end_hour", workEndHour), ("snooze_hours", snoozeHours),
-         ("hide_after_open_minutes", hideAfterOpenMinutes), ("hide_message_text", hideMessageText ? 1 : 0)]
+         ("hide_after_open_minutes", hideAfterOpenMinutes), ("hide_message_text", hideMessageText ? 1 : 0),
+         ("while_hidden", Double(whileHidden.rawValue))]
     }
 
     mutating func apply(key: String, value: Double) {
@@ -78,7 +81,19 @@ public struct FocusSettings: Equatable, Sendable {
         case "snooze_hours": snoozeHours = value
         case "hide_after_open_minutes": hideAfterOpenMinutes = value
         case "hide_message_text": hideMessageText = value != 0
+        case "while_hidden": whileHidden = WhileHidden(rawValue: Int(value)) ?? .farewellsHide
         default: break   // unknown keys from a newer version are ignored
         }
     }
+}
+
+/// What a hidden panel does when something happens.
+public enum WhileHidden: Int, CaseIterable, Sendable {
+    /// Show, and stay shown, for anything (the original behaviour).
+    case stay = 0
+    /// Show and stay for things that need you; show, shimmer, then hide again for things
+    /// that don't (a ticket closed, answered or removed). The default.
+    case farewellsHide = 1
+    /// Never show while hidden. Items still wait for you in the panel.
+    case never = 2
 }

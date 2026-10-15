@@ -53,9 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         }
         fade.panel = panel
-        // Hiding is cosmetic: anything that lights up brings a hidden panel back so it's seen.
+        // Something lit up. A visible panel needs nothing; a hidden one follows Settings →
+        // While hidden (see SyncGuards.hiddenPanelAction).
         alertObserver = model.$alertTick.dropFirst().sink { [weak self] _ in
-            MainActor.assumeIsolated { self?.returnFromReply() }
+            MainActor.assumeIsolated { self?.lightUp() }
         }
         setupStatusItem()
 
@@ -146,8 +147,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if bundleId != replyTarget { returnFromReply() }
     }
 
+    /// True while the panel is showing only for a farewell and will hide again afterwards.
+    private var showingForFarewell = false
+    private var rehideTimer: Timer?
+
+    private func lightUp() {
+        let needsYou = model.lastAlertNeedsYou
+        // Already up for a farewell and something that needs you arrives: it stays.
+        if panel.isVisible {
+            if showingForFarewell && needsYou { cancelRehide() }
+            return
+        }
+        switch SyncGuards.hiddenPanelAction(needsYou: needsYou, setting: model.settings.whileHidden) {
+        case .stayHidden:
+            return
+        case .showAndStay:
+            cancelRehide()
+            returnFromReply()
+        case .showThenHide:
+            // Show just for the farewell; any hide-while-replying state is left as it was, so
+            // the panel still returns when the reply is done.
+            showingForFarewell = true
+            panel.orderFrontRegardless()
+            rehideTimer?.invalidate()
+            rehideTimer = Timer.scheduledTimer(withTimeInterval: model.lastFarewellSeconds + 0.5, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.showingForFarewell else { return }
+                    self.showingForFarewell = false
+                    self.panel.orderOut(nil)
+                }
+            }
+        }
+    }
+
+    private func cancelRehide() {
+        showingForFarewell = false
+        rehideTimer?.invalidate()
+        rehideTimer = nil
+    }
+
     /// Puts the panel back where it was.
     private func returnFromReply() {
+        cancelRehide()   // properly back: don't hide again
         returnTimer?.invalidate()
         returnTimer = nil
         replyTarget = nil
@@ -156,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func togglePanel() {
+        cancelRehide()   // you chose: never re-hide on you
         if panel.isVisible {
             panel.orderOut(nil)
         } else {

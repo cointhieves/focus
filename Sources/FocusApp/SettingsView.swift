@@ -97,6 +97,23 @@ struct SettingsView: View {
                 Text("Hide after opening an item")
                 Text("Focus hides while you reply and comes back when you switch to another app, or after this long.")
             }
+            LabeledContent {
+                Picker("", selection: Binding(get: { model.settings.whileHidden },
+                                              set: { var s = model.settings; s.whileHidden = $0; model.updateSettings(s) })) {
+                    Text("Show for things that need me").tag(WhileHidden.farewellsHide)
+                    Text("Show for everything").tag(WhileHidden.stay)
+                    Text("Never show").tag(WhileHidden.never)
+                }
+                .labelsHidden()
+                .fixedSize()
+            } label: {
+                Text("While hidden")
+                Text(model.settings.whileHidden == .never
+                     ? "Focus stays hidden until you show it, so you may not see that someone is waiting on you."
+                     : model.settings.whileHidden == .stay
+                     ? "Anything new, including a ticket closing or being answered, brings Focus back."
+                     : "Something that needs you brings Focus back. A ticket closing or being answered shows briefly, then hides again.")
+            }
             Toggle(isOn: Binding(get: { model.settings.hideMessageText },
                                  set: { var s = model.settings; s.hideMessageText = $0; model.updateSettings(s) })) {
                 Text("Hide message text")

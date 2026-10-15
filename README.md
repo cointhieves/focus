@@ -16,6 +16,10 @@ tool drives the same queue, which is handy for scripts and AI agents.
 Most recent first. To update, pull the latest code and run `make install` again.
 
 **October 6, 2026**
+- **Hidden means hidden, unless you're needed.** New setting **While hidden** (Settings →
+  Panel). By default, something that needs you (a message, a reply, a deadline) brings a
+  hidden Focus back and it stays; a ticket closing or being answered shows briefly, then
+  Focus hides again. You can also choose **Show for everything** or **Never show**.
 - **Task groups.** Group your tasks under a bold heading. Right-click any row and choose
   **New group above** or **below** (or **Make this a group** on a task), then right-click the
   heading to **Add task**, **Rename**, **Ungroup** or **Delete** it. Drag tasks into, out of

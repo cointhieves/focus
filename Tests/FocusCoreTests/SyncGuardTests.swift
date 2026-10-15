@@ -27,3 +27,13 @@ private func row(_ ext: String, removed: Bool = false) -> Item {
     #expect(SyncGuards.prunedNames(names, keeping: ["id-2"]) == ["id-2": "Bob"])
     #expect(SyncGuards.prunedNames(names, keeping: []) == [:])
 }
+
+// A hidden panel: things that need you show and stay; a farewell shows, then hides again
+// (default); "never" keeps it hidden; "stay" is the old show-and-stay for everything.
+@Test func hiddenPanelActionFollowsTheSetting() {
+    #expect(SyncGuards.hiddenPanelAction(needsYou: true, setting: .farewellsHide) == .showAndStay)
+    #expect(SyncGuards.hiddenPanelAction(needsYou: false, setting: .farewellsHide) == .showThenHide)
+    #expect(SyncGuards.hiddenPanelAction(needsYou: false, setting: .stay) == .showAndStay)
+    #expect(SyncGuards.hiddenPanelAction(needsYou: true, setting: .never) == .stayHidden)
+    #expect(FocusSettings().whileHidden == .farewellsHide)
+}
