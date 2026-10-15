@@ -156,7 +156,7 @@ waiting on you.
 
 | Action | What it does |
 |---|---|
-| **Click** | Opens it. The panel hides while you reply and comes back after 5 minutes (a setting) or when you switch apps. |
+| **Click** | Opens it. Slack items open straight in the Slack app at the right message or thread (no browser tab). The panel hides while you reply and comes back after 5 minutes (a setting) or when you switch apps. |
 | **Drag** | Puts it where you drop it, until something new happens on it. |
 | **Skip** | Sends it to the back of the line. |
 | **Dismiss** | Hides it until something new happens on it. |

@@ -87,3 +87,17 @@ private func freePort() -> UInt16 {
     _ = withUnsafeMutablePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) } }
     return UInt16(bigEndian: addr.sin6_port)
 }
+
+// Slack items open straight in the desktop app (no leftover browser tab).
+@Test func slackAppLinkFromPermalinks() {
+    let thread = URL(string: "https://x.slack.com/archives/C111/p1791561084578999?thread_ts=1791546127.539479&cid=C111")!
+    #expect(SlackAppLink.from(thread, teamId: "T1")?.absoluteString
+            == "slack://channel?team=T1&id=C111&message=1791561084.578999&thread_ts=1791546127.539479")
+    let dm = URL(string: "https://x.slack.com/archives/D222")!
+    #expect(SlackAppLink.from(dm, teamId: "T1")?.absoluteString == "slack://channel?team=T1&id=D222")
+    let mention = URL(string: "https://x.slack.com/archives/C333/p1700000000123456")!
+    #expect(SlackAppLink.from(mention, teamId: "T1")?.absoluteString == "slack://channel?team=T1&id=C333&message=1700000000.123456")
+    // No workspace id yet, or not a Slack link: keep the original link.
+    #expect(SlackAppLink.from(thread, teamId: "") == nil)
+    #expect(SlackAppLink.from(URL(string: "https://example.atlassian.net/browse/ABC-1")!, teamId: "T1") == nil)
+}

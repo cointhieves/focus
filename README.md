@@ -16,6 +16,9 @@ tool drives the same queue, which is handy for scripts and AI agents.
 Most recent first. To update, pull the latest code and run `make install` again.
 
 **October 15, 2026**
+- **Slack opens in the Slack app.** Clicking a Slack item opens it straight in the Slack
+  desktop app, at the right message or thread, without leaving a "Launching…" tab in your
+  browser. If Focus can't use the app, it falls back to the web link as before.
 - **Hidden means hidden, unless you're needed.** New setting **While hidden** (Settings →
   Panel). By default, something that needs you (a message, a reply, a deadline) brings a
   hidden Focus back and it stays; a ticket closing or being answered shows briefly, then

@@ -117,7 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the app that opened it, or the configured minutes pass (tab switches inside a
     /// browser aren't visible to macOS, hence the timer).
     private func openItem(_ url: URL) {
-        NSWorkspace.shared.open(url)
+        NSWorkspace.shared.open(model.openURL(for: url))
         let minutes = model.settings.hideAfterOpenMinutes
         guard minutes > 0 else { return }
         replyTarget = nil

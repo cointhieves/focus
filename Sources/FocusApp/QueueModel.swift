@@ -701,6 +701,17 @@ final class QueueModel: ObservableObject {
     private var slackSource: SlackSource?
     private lazy var slackMe: String = slackTokens?.userId ?? ""
 
+    /// Slack workspace id, for opening items straight in the Slack app.
+    private(set) lazy var slackTeamId: String = (try? store.pref("slack_team_id")) ?? ""
+
+    /// The link to open for an item: Slack items go straight to the desktop app when it's
+    /// installed (no leftover browser tab); everything else, and any fallback, as is.
+    func openURL(for url: URL) -> URL {
+        guard let app = SlackAppLink.from(url, teamId: slackTeamId),
+              NSWorkspace.shared.urlForApplication(toOpen: app) != nil else { return url }
+        return app
+    }
+
     /// Channels where bot alerts that mention me or my groups count (names, normalized).
     @Published private(set) var slackBotChannels: Set<String> = []
 
@@ -725,7 +736,11 @@ final class QueueModel: ObservableObject {
             defer { slackSyncing = false }
             do {
                 let token = try await validSlackToken()
-                if slackMe.isEmpty { slackMe = try await SlackClient().authTest(token: token).userId }
+                if slackMe.isEmpty || slackTeamId.isEmpty {
+                    let who = try await SlackClient().authTest(token: token)
+                    if slackMe.isEmpty { slackMe = who.userId }
+                    if !who.teamId.isEmpty { slackTeamId = who.teamId; try? store.setPref("slack_team_id", who.teamId) }
+                }
                 if slackSource == nil || slackSource?.token != token {
                     // Keep the user-name cache across token rotation.
                     slackSource = slackSource.map { $0.with(token: token) } ?? SlackSource(token: token, me: slackMe)
@@ -774,6 +789,7 @@ final class QueueModel: ObservableObject {
             do {
                 let who = try await SlackClient().authTest(token: try await validSlackToken())
                 slackStatus = "Connected as \(who.user) in \(who.team)"
+                if !who.teamId.isEmpty { slackTeamId = who.teamId; try? store.setPref("slack_team_id", who.teamId) }
                 if slackMe.isEmpty { slackMe = who.userId }
                 slackBusy = false
                 syncSlack()

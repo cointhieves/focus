@@ -93,6 +93,35 @@ public struct SlackIdentity: Sendable {
     public let user: String
     public let team: String
     public let userId: String
+    public var teamId: String = ""
+}
+
+/// Opens Slack items straight in the desktop app. A slack.com permalink always goes through
+/// the browser, which hands off to the app and leaves a dead "Launching" tab behind.
+public enum SlackAppLink {
+    /// slack://channel?team=T&id=C[&message=TS][&thread_ts=TTS] for a slack.com permalink like
+    /// https://x.slack.com/archives/C123/p1700000000123456?thread_ts=1700000000.000100.
+    /// `message` and `thread_ts` aren't in Slack's docs but open the exact message / thread in
+    /// the desktop app; if Slack drops them, the documented team + channel part still opens
+    /// the conversation. Nil when it can't be built (fall back to the permalink).
+    public static func from(_ permalink: URL, teamId: String) -> URL? {
+        guard !teamId.isEmpty, let host = permalink.host, host.hasSuffix("slack.com") else { return nil }
+        let parts = permalink.pathComponents
+        guard let i = parts.firstIndex(of: "archives"), i + 1 < parts.count else { return nil }
+        var c = URLComponents()
+        c.scheme = "slack"; c.host = "channel"
+        var q = [URLQueryItem(name: "team", value: teamId), URLQueryItem(name: "id", value: parts[i + 1])]
+        if i + 2 < parts.count, parts[i + 2].hasPrefix("p"), parts[i + 2].count > 7 {
+            let digits = String(parts[i + 2].dropFirst())
+            q.append(URLQueryItem(name: "message", value: digits.dropLast(6) + "." + digits.suffix(6)))
+        }
+        if let tts = URLComponents(url: permalink, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "thread_ts" })?.value {
+            q.append(URLQueryItem(name: "thread_ts", value: tts))
+        }
+        c.queryItems = q
+        return c.url
+    }
 }
 
 public struct SlackClient: Sendable {
@@ -142,7 +171,7 @@ public struct SlackClient: Sendable {
     public func authTest(token: String) async throws -> SlackIdentity {
         let json = try await post("auth.test", form: [:], token: token)
         return SlackIdentity(user: json["user"] as? String ?? "?", team: json["team"] as? String ?? "?",
-                             userId: json["user_id"] as? String ?? "")
+                             userId: json["user_id"] as? String ?? "", teamId: json["team_id"] as? String ?? "")
     }
 
     /// The user token sits under `authed_user` on first sign-in; a refresh of a user
