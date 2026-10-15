@@ -15,7 +15,7 @@ tool drives the same queue, which is handy for scripts and AI agents.
 
 Most recent first. To update, pull the latest code and run `make install` again.
 
-**October 6, 2026**
+**October 15, 2026**
 - **Hidden means hidden, unless you're needed.** New setting **While hidden** (Settings →
   Panel). By default, something that needs you (a message, a reply, a deadline) brings a
   hidden Focus back and it stays; a ticket closing or being answered shows briefly, then
@@ -28,6 +28,12 @@ Most recent first. To update, pull the latest code and run `make install` again.
   soonest first; when one of them is close to due, the whole group jumps to the top.
 - **Edit your tasks.** Right-click a task and choose **Edit** to change its text. Changing
   the time in the text moves the deadline ("by friday 3pm"), and removing it removes the timer.
+
+**October 9, 2026**
+- **Skip goes to the very bottom.** Skipping an item now always sends it to the end of the
+  list, even below rows you've dragged to the end.
+
+**October 7, 2026**
 - **Drag to reorder.** Drag any row up or down to put it where you want; a blue line shows
   where it lands. It stays there while normal rules carry on around it. When something new
   happens on it (a reply, a deadline), it jumps to the top as usual and, once you've dealt
@@ -39,13 +45,17 @@ Most recent first. To update, pull the latest code and run `make install` again.
   "call Sam tomorrow at 10am", "check in on Wednesday", "send report Friday". A day with no
   time means the end of your workday (from Settings). "by 5pm" and "in 30 minutes" still work.
 
-**October 1, 2026**
+**October 2, 2026**
 - **A Jira hiccup can't wipe the panel.** If Jira briefly reports no sprint tickets at all,
   Focus waits one more sync to confirm before marking anything REMOVED.
+
+**October 1, 2026**
 - **Amber means amber.** An item past its "green until" time now turns a clear amber
   straight away and deepens to red, instead of staying green-looking until halfway there.
 
 **September 30, 2026**
+- **Closed tickets leave right away.** A ticket you close now plays CLOSED on the next sync,
+  even while Jira's search still lists it as in progress.
 - **Team tags are handled once your team answers.** When someone tags a Slack group you're
   in (not you personally), Focus shows that one message and clears it once a member of the
   group replies in its thread. It no longer drags you into every later reply. Tags of
